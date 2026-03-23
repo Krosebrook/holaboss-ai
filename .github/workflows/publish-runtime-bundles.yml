@@ -121,6 +121,79 @@ jobs:
             out/${{ env.OUTPUT_DIR }}/runtime/metadata.json
           if-no-files-found: error
 
+  publish-macos-desktop-dmg:
+    name: Build macOS desktop DMG
+    needs:
+      - ensure-runtime-release
+      - publish-macos-runtime
+    runs-on: macos-latest
+    env:
+      RELEASE_TAG: ${{ needs.ensure-runtime-release.outputs.release_tag }}
+      RUNTIME_ARTIFACT_NAME: holaboss-runtime-macos-${{ github.sha }}
+      DESKTOP_ASSET_PREFIX: holaboss-desktop-macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+
+      - name: Download macOS runtime artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ env.RUNTIME_ARTIFACT_NAME }}
+          path: out/runtime-artifact
+
+      - name: Install desktop dependencies
+        run: npm run desktop:install
+
+      - name: Build unsigned macOS desktop DMG
+        if: ${{ secrets.MAC_CERTIFICATE == '' || secrets.MAC_CERTIFICATE_PASSWORD == '' || secrets.APPLE_ID == '' || secrets.APPLE_APP_SPECIFIC_PASSWORD == '' || secrets.APPLE_TEAM_ID == '' }}
+        env:
+          HOLABOSS_RUNTIME_TARBALL: ${{ github.workspace }}/out/runtime-artifact/holaboss-runtime-macos-${{ github.sha }}.tar.gz
+          GITHUB_TOKEN: ${{ github.token }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm --prefix desktop run prepare:runtime
+          npm --prefix desktop run build
+          npx --prefix desktop electron-builder --mac dmg --arm64 -c.mac.identity=null
+
+      - name: Build signed and notarized macOS desktop DMG
+        if: ${{ secrets.MAC_CERTIFICATE != '' && secrets.MAC_CERTIFICATE_PASSWORD != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        env:
+          HOLABOSS_RUNTIME_TARBALL: ${{ github.workspace }}/out/runtime-artifact/holaboss-runtime-macos-${{ github.sha }}.tar.gz
+          GITHUB_TOKEN: ${{ github.token }}
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          npm --prefix desktop run prepare:runtime
+          npm --prefix desktop run build
+          npx --prefix desktop electron-builder --mac dmg --arm64
+
+      - name: Upload macOS desktop DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.DESKTOP_ASSET_PREFIX }}-${{ github.sha }}
+          path: desktop/out/release/*.dmg
+          if-no-files-found: error
+
+      - name: Upload macOS desktop DMG release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${RELEASE_TAG}" \
+            desktop/out/release/*.dmg \
+            --clobber
+
   publish-linux-runtime:
     name: Build Linux runtime bundle
     needs: ensure-runtime-release
