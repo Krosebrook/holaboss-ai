@@ -6,6 +6,7 @@ on:
       - dev
       - main
     paths:
+      - "desktop/**"
       - "runtime/deploy/**"
       - "runtime/src/**"
       - "runtime/pyproject.toml"
