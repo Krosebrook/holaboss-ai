@@ -1,0 +1,46 @@
+name: OSS CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  desktop-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm run desktop:install
+
+      - name: Desktop typecheck
+        run: npm run desktop:typecheck
+
+  runtime-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Runtime tests
+        run: npm run runtime:test

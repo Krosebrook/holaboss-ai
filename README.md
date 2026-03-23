@@ -2,11 +2,28 @@
 
 This repo now contains both the local desktop app and the runtime it embeds.
 
-## Layout
+## What This Repo Is
 
-- `desktop/`: Electron + React desktop app
-- `runtime/`: Python runtime package, tests, and packaging scripts
-- `.github/workflows/`: CI and publishing workflows
+- `desktop/`: Electron desktop workspace app
+- `runtime/`: packaged Python runtime, tests, and bundle tooling
+- `.github/workflows/`: release and publishing workflows
+
+This repository is public OSS. It supports local development and local runtime packaging without requiring login.
+
+Backend-connected Holaboss product behavior is separate from the baseline local OSS workflow.
+
+## What Works Without Login
+
+- local desktop development
+- local runtime packaging
+- local workspace/runtime flows
+- local typechecking and runtime tests
+
+## What May Require Holaboss Backend Access
+
+- hosted sign-in flows
+- auth-backed product features
+- backend-connected Holaboss services
 
 ## Prerequisites
 
@@ -61,7 +78,7 @@ Build a local macOS desktop bundle with the locally built runtime embedded:
 npm run desktop:dist:mac:local
 ```
 
-Stage the runtime from the pinned desktop manifest instead of building it locally:
+Stage the latest released runtime bundle for your current host platform:
 
 ```bash
 npm run desktop:prepare-runtime

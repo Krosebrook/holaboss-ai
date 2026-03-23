@@ -12,6 +12,6 @@
     "desktop:prepare-runtime:local": "npm --prefix desktop run prepare:runtime:local",
     "desktop:dist:mac:local": "npm --prefix desktop run dist:mac:local",
     "runtime:clean": "rm -rf out/runtime-macos out/runtime-root runtime/out",
-    "runtime:test": "cd runtime && uv run pytest"
+    "runtime:test": "cd runtime && uv run python -m pytest"
   }
 }
