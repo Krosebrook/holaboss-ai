@@ -131,6 +131,11 @@ jobs:
       RELEASE_TAG: ${{ needs.ensure-runtime-release.outputs.release_tag }}
       RUNTIME_ARTIFACT_NAME: holaboss-runtime-macos-${{ github.sha }}
       DESKTOP_ASSET_PREFIX: holaboss-desktop-macos
+      MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
+      MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -154,7 +159,7 @@ jobs:
         run: npm run desktop:install
 
       - name: Build unsigned macOS desktop DMG
-        if: ${{ secrets.MAC_CERTIFICATE == '' || secrets.MAC_CERTIFICATE_PASSWORD == '' || secrets.APPLE_ID == '' || secrets.APPLE_APP_SPECIFIC_PASSWORD == '' || secrets.APPLE_TEAM_ID == '' }}
+        if: ${{ env.MAC_CERTIFICATE == '' || env.MAC_CERTIFICATE_PASSWORD == '' || env.APPLE_ID == '' || env.APPLE_APP_SPECIFIC_PASSWORD == '' || env.APPLE_TEAM_ID == '' }}
         env:
           HOLABOSS_RUNTIME_TARBALL: ${{ github.workspace }}/out/runtime-artifact/holaboss-runtime-macos-${{ github.sha }}.tar.gz
           GITHUB_TOKEN: ${{ github.token }}
@@ -165,15 +170,15 @@ jobs:
           npx --prefix desktop electron-builder --mac dmg --arm64 -c.mac.identity=null
 
       - name: Build signed and notarized macOS desktop DMG
-        if: ${{ secrets.MAC_CERTIFICATE != '' && secrets.MAC_CERTIFICATE_PASSWORD != '' && secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+        if: ${{ env.MAC_CERTIFICATE != '' && env.MAC_CERTIFICATE_PASSWORD != '' && env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
         env:
           HOLABOSS_RUNTIME_TARBALL: ${{ github.workspace }}/out/runtime-artifact/holaboss-runtime-macos-${{ github.sha }}.tar.gz
           GITHUB_TOKEN: ${{ github.token }}
-          CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_LINK: ${{ env.MAC_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ env.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ env.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ env.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
         run: |
           npm --prefix desktop run prepare:runtime
           npm --prefix desktop run build
