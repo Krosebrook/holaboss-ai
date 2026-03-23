@@ -75,6 +75,7 @@ jobs:
       RELEASE_TITLE: ${{ needs.ensure-runtime-release.outputs.release_title }}
       OUTPUT_DIR: runtime-macos
       ASSET_PREFIX: holaboss-runtime-macos
+      RELEASE_ASSET_NAME: holaboss-runtime-macos.tar.gz
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -101,14 +102,14 @@ jobs:
 
       - name: Archive macOS runtime bundle
         run: |
-          tar -C out -czf "out/${ASSET_PREFIX}-${GITHUB_SHA}.tar.gz" "${OUTPUT_DIR}"
+          tar -C out -czf "out/${RELEASE_ASSET_NAME}" "${OUTPUT_DIR}"
 
       - name: Upload macOS runtime bundle release asset
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${RELEASE_TAG}" \
-            "out/${ASSET_PREFIX}-${GITHUB_SHA}.tar.gz" \
+            "out/${RELEASE_ASSET_NAME}" \
             --clobber
 
       - name: Upload macOS runtime bundle artifact
@@ -116,7 +117,7 @@ jobs:
         with:
           name: ${{ env.ASSET_PREFIX }}-${{ github.sha }}
           path: |
-            out/${{ env.ASSET_PREFIX }}-${{ github.sha }}.tar.gz
+            out/${{ env.RELEASE_ASSET_NAME }}
             out/${{ env.OUTPUT_DIR }}/package-metadata.json
             out/${{ env.OUTPUT_DIR }}/runtime/metadata.json
           if-no-files-found: error
@@ -131,6 +132,7 @@ jobs:
       RELEASE_TAG: ${{ needs.ensure-runtime-release.outputs.release_tag }}
       RUNTIME_ARTIFACT_NAME: holaboss-runtime-macos-${{ github.sha }}
       DESKTOP_ASSET_PREFIX: holaboss-desktop-macos
+      DESKTOP_RELEASE_ASSET_NAME: Holaboss-Workspace-macos-arm64.dmg
       MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
       MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -213,8 +215,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          dmg_path="$(find desktop/out/release -maxdepth 1 -name '*.dmg' -print -quit)"
+          if [ -z "${dmg_path}" ]; then
+            echo "no DMG found in desktop/out/release" >&2
+            exit 1
+          fi
+          stable_path="desktop/out/release/${DESKTOP_RELEASE_ASSET_NAME}"
+          cp "${dmg_path}" "${stable_path}"
           gh release upload "${RELEASE_TAG}" \
-            desktop/out/release/*.dmg \
+            "${stable_path}" \
             --clobber
 
   publish-linux-runtime:
@@ -226,6 +235,7 @@ jobs:
       RELEASE_TITLE: ${{ needs.ensure-runtime-release.outputs.release_title }}
       OUTPUT_DIR: runtime-linux
       ASSET_PREFIX: holaboss-runtime-linux
+      RELEASE_ASSET_NAME: holaboss-runtime-linux.tar.gz
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -252,14 +262,14 @@ jobs:
 
       - name: Archive Linux runtime bundle
         run: |
-          tar -C out -czf "out/${ASSET_PREFIX}-${GITHUB_SHA}.tar.gz" "${OUTPUT_DIR}"
+          tar -C out -czf "out/${RELEASE_ASSET_NAME}" "${OUTPUT_DIR}"
 
       - name: Upload Linux runtime bundle release asset
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${RELEASE_TAG}" \
-            "out/${ASSET_PREFIX}-${GITHUB_SHA}.tar.gz" \
+            "out/${RELEASE_ASSET_NAME}" \
             --clobber
 
       - name: Upload Linux runtime bundle artifact
@@ -267,7 +277,7 @@ jobs:
         with:
           name: ${{ env.ASSET_PREFIX }}-${{ github.sha }}
           path: |
-            out/${{ env.ASSET_PREFIX }}-${{ github.sha }}.tar.gz
+            out/${{ env.RELEASE_ASSET_NAME }}
             out/${{ env.OUTPUT_DIR }}/package-metadata.json
             out/${{ env.OUTPUT_DIR }}/runtime/metadata.json
           if-no-files-found: error
