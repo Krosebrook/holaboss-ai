@@ -211,7 +211,7 @@ function eventSessionId(rawEvent: unknown): string {
 function eventDelta(rawEvent: unknown): string {
   const payload = asRecord(rawEvent);
   const properties = asRecord(payload?.properties);
-  return firstNonEmptyString(properties?.delta) ?? "";
+  return typeof properties?.delta === "string" ? properties.delta : "";
 }
 
 function eventPart(rawEvent: unknown): Record<string, unknown> | null {

@@ -24,7 +24,7 @@ test("mapOpencodeEvent flushes buffered deltas once part type is known", () => {
   );
 
   assert.deepEqual(firstEvents, []);
-  assert.deepEqual(state.pendingPartDeltas.get("text-part-1"), [["message.part.delta", "Hello"]]);
+  assert.deepEqual(state.pendingPartDeltas.get("text-part-1"), [["message.part.delta", "Hello "]]);
 
   state.partTypeSnapshots.set("text-part-1", "text");
   const secondEvents = mapOpencodeEvent(
@@ -44,7 +44,7 @@ test("mapOpencodeEvent flushes buffered deltas once part type is known", () => {
     {
       event_type: "output_delta",
       payload: {
-        delta: "Hello",
+        delta: "Hello ",
         event: "message.part.delta",
         source: "opencode",
         part_id: "text-part-1",
