@@ -39,6 +39,13 @@ _RUNTIME_EXEC_CONTEXT_KEY = "_sandbox_runtime_exec_v1"
 _DEFAULT_MODEL_HEADERS = object()
 
 
+def test_runtime_root_dir_resolves_app_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_file = "/app/sandbox_agent_runtime/runner.py"
+    monkeypatch.setattr(runner_module, "__file__", fake_file)
+
+    assert runner_module._runtime_root_dir() == Path("/app")
+
+
 def _runtime_exec_context(
     *,
     run_id: str = "run-1",

@@ -302,7 +302,7 @@ async def _emit_event_with_push(*, event: RunnerOutputEvent, push_client: _PushE
 
 
 def _runtime_root_dir() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[1]
 
 
 def _ts_harness_host_entry_path() -> Path:

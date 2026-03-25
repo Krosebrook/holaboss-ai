@@ -45,7 +45,7 @@ class TsApiProxySupport:
         return raw.rstrip("/") or _DEFAULT_TS_API_SERVER_URL
 
     def runtime_root_dir(self) -> Path:
-        return Path(self._current_file).resolve().parents[2]
+        return Path(self._current_file).resolve().parents[1]
 
     def ts_api_server_entry_path(self) -> Path:
         return self.runtime_root_dir() / "api-server" / "dist" / "index.mjs"

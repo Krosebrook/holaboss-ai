@@ -82,7 +82,7 @@ def _ts_state_store_enabled() -> bool:
 
 
 def _runtime_root_dir() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[1]
 
 
 def _ts_state_store_entry_path() -> Path:

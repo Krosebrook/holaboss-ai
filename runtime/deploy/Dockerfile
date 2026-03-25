@@ -32,6 +32,9 @@ RUN cp /opt/holaboss-runtime/app/pyproject.toml /app/pyproject.toml \
 RUN uv sync --frozen --no-dev --no-install-project
 RUN mkdir -p /app \
     && cp -R /opt/holaboss-runtime/app/. /app/ \
+    && cp -R /opt/holaboss-runtime/api-server /app/api-server \
+    && cp -R /opt/holaboss-runtime/harness-host /app/harness-host \
+    && cp -R /opt/holaboss-runtime/state-store /app/state-store \
     && cp /opt/holaboss-runtime/bin/hb /usr/local/bin/hb \
     && chmod +x /usr/local/bin/hb \
     && chmod +x /opt/holaboss-runtime/bootstrap/*.sh

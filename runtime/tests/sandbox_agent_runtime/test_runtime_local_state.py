@@ -8,6 +8,13 @@ from pathlib import Path
 from sandbox_agent_runtime import runtime_local_state as state_module
 
 
+def test_runtime_root_dir_resolves_app_parent(monkeypatch) -> None:
+    fake_file = "/app/sandbox_agent_runtime/runtime_local_state.py"
+    monkeypatch.setattr(state_module, "__file__", fake_file)
+
+    assert state_module._runtime_root_dir() == Path("/app")
+
+
 def test_workspace_registry_round_trip_uses_hidden_identity_file(monkeypatch, tmp_path: Path) -> None:
     db_path = tmp_path / "runtime.db"
     workspace_root = tmp_path / "workspace"

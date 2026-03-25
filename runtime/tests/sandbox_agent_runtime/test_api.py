@@ -1136,6 +1136,10 @@ async def test_workspace_file_routes_proxy_to_ts_api_when_enabled(
             "/api/v1/workspaces/workspace-1/apply-template",
             json={"files": [{"path": "docs/readme.md", "content_base64": "aGVsbG8="}], "replace_existing": False},
         )
+        applied_from_url = await client.post(
+            "/api/v1/workspaces/workspace-1/apply-template-from-url",
+            json={"url": "http://example.test/template.zip", "replace_existing": True, "api_key": "test-key"},
+        )
         read = await client.get("/api/v1/workspaces/workspace-1/files/docs/readme.md")
         written = await client.put(
             "/api/v1/workspaces/workspace-1/files/docs/readme.md",
@@ -1144,6 +1148,7 @@ async def test_workspace_file_routes_proxy_to_ts_api_when_enabled(
         snapshot = await client.get("/api/v1/workspaces/workspace-1/snapshot")
 
     assert applied.status_code == 200
+    assert applied_from_url.status_code == 200
     assert read.status_code == 200
     assert written.status_code == 200
     assert snapshot.status_code == 200
@@ -1155,6 +1160,16 @@ async def test_workspace_file_routes_proxy_to_ts_api_when_enabled(
             "json_body": {
                 "files": [{"path": "docs/readme.md", "content_base64": "aGVsbG8="}],
                 "replace_existing": False,
+            },
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/workspaces/workspace-1/apply-template-from-url",
+            "params": None,
+            "json_body": {
+                "url": "http://example.test/template.zip",
+                "replace_existing": True,
+                "api_key": "test-key",
             },
         },
         {
@@ -1405,3 +1420,9 @@ def test_ts_api_server_enabled_defaults_on(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.delenv("HOLABOSS_RUNTIME_USE_TS_API_SERVER", raising=False)
 
     assert api_module._ts_api_proxy.ts_api_server_enabled() is True
+
+
+def test_ts_api_runtime_root_dir_resolves_app_parent() -> None:
+    proxy = api_module.TsApiProxySupport(app=app, current_file="/app/sandbox_agent_runtime/ts_api_proxy.py")
+
+    assert proxy.runtime_root_dir() == Path("/app")

@@ -15,6 +15,7 @@ from sandbox_agent_runtime.api_models import (
     AppStartRequest,
     AppStopRequest,
     ApplyTemplateRequest,
+    ApplyTemplateFromUrlRequest,
     ExecSandboxRequest,
     InstallAppRequest,
     InstallAppResponse,
@@ -691,6 +692,18 @@ async def apply_template(workspace_id: str, payload: ApplyTemplateRequest) -> di
     return await _ts_api_proxy.proxy_ts_api_json(
         "POST",
         f"/api/v1/workspaces/{workspace_id}/apply-template",
+        json_body=payload.model_dump(mode="json"),
+    )
+
+
+@app.post("/api/v1/workspaces/{workspace_id}/apply-template-from-url")
+async def apply_template_from_url(
+    workspace_id: str,
+    payload: ApplyTemplateFromUrlRequest,
+) -> dict[str, Any]:
+    return await _ts_api_proxy.proxy_ts_api_json(
+        "POST",
+        f"/api/v1/workspaces/{workspace_id}/apply-template-from-url",
         json_body=payload.model_dump(mode="json"),
     )
 

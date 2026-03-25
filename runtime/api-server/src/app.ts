@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { Readable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
@@ -1117,6 +1118,86 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
     }
 
     return reply.send({ status: "applied", files_written: filesWritten });
+  });
+
+  app.post("/api/v1/workspaces/:workspaceId/apply-template-from-url", async (request, reply) => {
+    if (!isRecord(request.body)) {
+      return sendError(reply, 400, "request body must be an object");
+    }
+    const params = request.params as { workspaceId: string };
+    const url = requiredString(request.body.url, "url");
+    const replaceExisting = optionalBoolean(request.body.replace_existing, false);
+    const apiKey = optionalString(request.body.api_key);
+    const workspaceDir = store.workspaceDir(params.workspaceId);
+
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    if (replaceExisting) {
+      for (const entry of fs.readdirSync(workspaceDir, { withFileTypes: true })) {
+        if (entry.name === ".holaboss" || entry.name === "workspace.json") {
+          continue;
+        }
+        fs.rmSync(path.join(workspaceDir, entry.name), { recursive: true, force: true });
+      }
+    }
+
+    const zipPath = path.join(os.tmpdir(), `holaboss-template-${params.workspaceId}-${Date.now()}.zip`);
+    try {
+      const response = await fetch(url, {
+        headers: apiKey ? { "X-API-Key": apiKey } : undefined
+      });
+      if (!response.ok) {
+        return sendError(reply, 502, `template download failed with status ${response.status}`);
+      }
+      const archive = Buffer.from(await response.arrayBuffer());
+      fs.writeFileSync(zipPath, archive);
+
+      const extractScript = `
+import os
+import pathlib
+import shutil
+import sys
+import zipfile
+
+zip_path = pathlib.Path(sys.argv[1]).resolve()
+workspace_dir = pathlib.Path(sys.argv[2]).resolve()
+files_written = 0
+
+with zipfile.ZipFile(zip_path) as zf:
+    for info in zf.infolist():
+        rel_path = pathlib.PurePosixPath(info.filename)
+        target_path = (workspace_dir / rel_path).resolve()
+        if target_path != workspace_dir and workspace_dir not in target_path.parents:
+            raise SystemExit(f"path traversal detected: {info.filename}")
+        if info.is_dir():
+            target_path.mkdir(parents=True, exist_ok=True)
+            continue
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info, "r") as src, open(target_path, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        mode = (info.external_attr >> 16) & 0o777
+        if mode:
+            os.chmod(target_path, mode)
+        files_written += 1
+
+print(files_written)
+`.trim();
+      const extract = spawnSync("python3", ["-c", extractScript, zipPath, workspaceDir], {
+        encoding: "utf8"
+      });
+      if (extract.status !== 0) {
+        return sendError(reply, 500, extract.stderr.trim() || extract.stdout.trim() || "template extract failed");
+      }
+
+      const filesWritten = Number.parseInt(extract.stdout.trim(), 10);
+      return reply.send({
+        status: "applied",
+        files_written: Number.isFinite(filesWritten) ? filesWritten : 0
+      });
+    } catch (error) {
+      return sendError(reply, 500, error instanceof Error ? error.message : "template download failed");
+    } finally {
+      fs.rmSync(zipPath, { force: true });
+    }
   });
 
   app.get("/api/v1/workspaces/:workspaceId/files/*", async (request, reply) => {

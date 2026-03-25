@@ -323,6 +323,12 @@ class ApplyTemplateRequest(BaseModel):
     replace_existing: bool = False
 
 
+class ApplyTemplateFromUrlRequest(BaseModel):
+    url: str = Field(..., min_length=1)
+    replace_existing: bool = False
+    api_key: str | None = None
+
+
 class WriteFileRequest(BaseModel):
     content_base64: str
     executable: bool = False
