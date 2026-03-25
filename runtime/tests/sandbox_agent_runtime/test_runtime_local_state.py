@@ -9,10 +9,42 @@ from sandbox_agent_runtime import runtime_local_state as state_module
 
 
 def test_runtime_root_dir_resolves_app_parent(monkeypatch) -> None:
-    fake_file = "/app/sandbox_agent_runtime/runtime_local_state.py"
+    fake_file = "/runtime-root/app/sandbox_agent_runtime/runtime_local_state.py"
     monkeypatch.setattr(state_module, "__file__", fake_file)
 
-    assert state_module._runtime_root_dir() == Path("/app")
+    assert state_module._runtime_root_dir() == Path("/runtime-root")
+
+
+def test_ts_state_store_is_enabled_by_default_and_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.delenv("HOLABOSS_RUNTIME_USE_TS_STATE_STORE", raising=False)
+    monkeypatch.delenv("HOLABOSS_RUNTIME_DISABLE_TS_STATE_STORE", raising=False)
+
+    assert state_module._ts_state_store_enabled() is True
+
+    monkeypatch.setenv("HOLABOSS_RUNTIME_DISABLE_TS_STATE_STORE", "1")
+
+    assert state_module._ts_state_store_enabled() is False
+
+
+def test_ts_state_store_command_falls_back_to_source_entry(monkeypatch, tmp_path: Path) -> None:
+    runtime_root = tmp_path / "runtime-root"
+    source_entry = runtime_root / "state-store" / "src" / "cli.ts"
+    source_entry.parent.mkdir(parents=True, exist_ok=True)
+    source_entry.write_text("export {};\n", encoding="utf-8")
+    monkeypatch.setattr(state_module, "_runtime_root_dir", lambda: runtime_root)
+    monkeypatch.setenv("HOLABOSS_RUNTIME_NODE_BIN", "node-custom")
+
+    command = state_module._ts_state_store_command(operation="list-workspaces", encoded="payload-1")
+
+    assert command == [
+        "node-custom",
+        "--import",
+        "tsx",
+        str(source_entry),
+        "list-workspaces",
+        "--request-base64",
+        "payload-1",
+    ]
 
 
 def test_workspace_registry_round_trip_uses_hidden_identity_file(monkeypatch, tmp_path: Path) -> None:
@@ -172,8 +204,6 @@ def test_get_workspace_recovers_missing_row_from_identity_file(monkeypatch, tmp_
 
 
 def test_upsert_binding_delegates_to_ts_state_store_when_enabled(monkeypatch) -> None:
-    monkeypatch.setenv("HOLABOSS_RUNTIME_USE_TS_STATE_STORE", "1")
-
     def _fake_call(*, operation, payload):
         assert operation == "upsert-binding"
         assert payload == {
@@ -206,8 +236,6 @@ def test_upsert_binding_delegates_to_ts_state_store_when_enabled(monkeypatch) ->
 
 
 def test_list_session_messages_delegates_to_ts_state_store_when_enabled(monkeypatch) -> None:
-    monkeypatch.setenv("HOLABOSS_RUNTIME_USE_TS_STATE_STORE", "1")
-
     def _fake_call(*, operation, payload):
         assert operation == "list-session-messages"
         assert payload == {
@@ -240,7 +268,6 @@ def test_list_session_messages_delegates_to_ts_state_store_when_enabled(monkeypa
 
 
 def test_output_event_functions_delegate_to_ts_state_store_when_enabled(monkeypatch) -> None:
-    monkeypatch.setenv("HOLABOSS_RUNTIME_USE_TS_STATE_STORE", "1")
     captured: list[tuple[str, dict[str, object]]] = []
 
     def _fake_call(*, operation, payload):
@@ -294,7 +321,6 @@ def test_output_event_functions_delegate_to_ts_state_store_when_enabled(monkeypa
 
 
 def test_workspace_crud_delegates_to_ts_state_store_when_enabled(monkeypatch) -> None:
-    monkeypatch.setenv("HOLABOSS_RUNTIME_USE_TS_STATE_STORE", "1")
     captured: list[tuple[str, dict[str, object]]] = []
 
     def _fake_call(*, operation, payload):
@@ -423,8 +449,6 @@ def test_workspace_crud_delegates_to_ts_state_store_when_enabled(monkeypatch) ->
 
 
 def test_outputs_and_artifacts_delegate_to_ts_state_store_when_enabled(monkeypatch) -> None:
-    monkeypatch.setenv("HOLABOSS_RUNTIME_USE_TS_STATE_STORE", "1")
-
     def _fake_call(*, operation, payload):
         if operation == "create-output-folder":
             return {
@@ -553,8 +577,6 @@ def test_outputs_and_artifacts_delegate_to_ts_state_store_when_enabled(monkeypat
 
 
 def test_cronjobs_and_task_proposals_delegate_to_ts_state_store_when_enabled(monkeypatch) -> None:
-    monkeypatch.setenv("HOLABOSS_RUNTIME_USE_TS_STATE_STORE", "1")
-
     def _fake_call(*, operation, payload):
         if operation == "create-cronjob":
             return {

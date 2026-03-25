@@ -242,3 +242,42 @@ test("handleRequest maps cronjobs and task proposals to snake_case payloads", ()
   assert.equal(proposal.source_event_ids instanceof Array, true);
   assert.equal(updatedProposal.state, "accepted");
 });
+
+test("handleRequest maps app build operations to snake_case payloads", () => {
+  const root = makeTempDir("hb-state-store-cli-");
+  const options = {
+    dbPath: path.join(root, "runtime.db"),
+    workspaceRoot: path.join(root, "workspace")
+  };
+
+  const building = handleRequest("upsert-app-build", {
+    options,
+    workspace_id: "workspace-1",
+    app_id: "app-1",
+    status: "building"
+  }) as Record<string, unknown>;
+  const failed = handleRequest("upsert-app-build", {
+    options,
+    workspace_id: "workspace-1",
+    app_id: "app-1",
+    status: "failed",
+    error: "boom"
+  }) as Record<string, unknown>;
+  const fetched = handleRequest("get-app-build", {
+    options,
+    workspace_id: "workspace-1",
+    app_id: "app-1"
+  }) as Record<string, unknown>;
+  const deleted = handleRequest("delete-app-build", {
+    options,
+    workspace_id: "workspace-1",
+    app_id: "app-1"
+  });
+
+  assert.equal(building.workspace_id, "workspace-1");
+  assert.equal(building.app_id, "app-1");
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error, "boom");
+  assert.equal(fetched.updated_at, failed.updated_at);
+  assert.equal(deleted, true);
+});

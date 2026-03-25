@@ -13,11 +13,11 @@ import {
   type OutputFolderRecord,
   type OutputRecord,
   type SessionArtifactRecord,
-  type TaskProposalRecord,
-  RuntimeStateStore,
-  type OutputEventRecord,
   type SessionMessageRecord,
   type SessionRuntimeStateRecord,
+  type TaskProposalRecord,
+  type OutputEventRecord,
+  RuntimeStateStore,
   type WorkspaceRecord
 } from "@holaboss/runtime-state-store";
 
@@ -770,7 +770,7 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
     try {
       const targets = store
         .listWorkspaces()
-        .flatMap((workspace) => listWorkspaceComposeShutdownTargets(store.workspaceDir(workspace.id)));
+        .flatMap((workspace: WorkspaceRecord) => listWorkspaceComposeShutdownTargets(store.workspaceDir(workspace.id)));
       return await appLifecycleExecutor.shutdownAll({ targets });
     } catch (error) {
       if (error instanceof AppLifecycleExecutorError) {
@@ -967,12 +967,12 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
 
     let items = store.listWorkspaces({ includeDeleted });
     if (status) {
-      items = items.filter((item) => item.status === status);
+      items = items.filter((item: WorkspaceRecord) => item.status === status);
     }
 
     const paged = items.slice(offset, offset + limit);
     return {
-      items: paged.map((item) => workspaceRecordPayload(item)),
+      items: paged.map((item: WorkspaceRecord) => workspaceRecordPayload(item)),
       total: items.length,
       limit,
       offset
@@ -1732,7 +1732,9 @@ print(files_written)
 
   app.get("/api/v1/agent-sessions/by-workspace/:workspaceId/runtime-states", async (request) => {
     const params = request.params as { workspaceId: string };
-    const items = store.listRuntimeStates(params.workspaceId).map((item) => runtimeStatePayload(item));
+    const items = store
+      .listRuntimeStates(params.workspaceId)
+      .map((item: SessionRuntimeStateRecord) => runtimeStatePayload(item));
     return { items, count: items.length };
   });
 
@@ -1757,7 +1759,9 @@ print(files_written)
     const limit = Math.max(1, Math.min(1000, optionalInteger(query.limit, 200)));
     const offset = Math.max(0, optionalInteger(query.offset, 0));
     const allMessages = store.listSessionMessages({ workspaceId, sessionId: params.sessionId });
-    const messages = allMessages.slice(offset, offset + limit).map((message) => sessionMessagePayload(message));
+    const messages = allMessages
+      .slice(offset, offset + limit)
+      .map((message: SessionMessageRecord) => sessionMessagePayload(message));
     return {
       workspace_id: workspaceId,
       session_id: params.sessionId,
@@ -1818,7 +1822,7 @@ print(files_written)
     const resolvedWorkspaceId = workspaceId ?? profileId;
     const items = store
       .listSessionArtifacts({ sessionId: params.sessionId, workspaceId: resolvedWorkspaceId })
-      .map((item) => sessionArtifactPayload(item));
+      .map((item: SessionArtifactRecord) => sessionArtifactPayload(item));
     return { items, count: items.length };
   });
 
@@ -1838,7 +1842,7 @@ print(files_written)
       return sendError(reply, 400, "workspace_id is required");
     }
     return {
-      items: store.listOutputFolders({ workspaceId }).map((item) => outputFolderPayload(item))
+      items: store.listOutputFolders({ workspaceId }).map((item: OutputFolderRecord) => outputFolderPayload(item))
     };
   });
 
@@ -1905,7 +1909,7 @@ print(files_written)
       limit: Math.max(1, Math.min(200, optionalInteger(query.limit, 50))),
       offset: Math.max(0, optionalInteger(query.offset, 0))
     });
-    return { items: items.map((item) => outputPayload(item)) };
+    return { items: items.map((item: OutputRecord) => outputPayload(item)) };
   });
 
   app.get("/api/v1/outputs/counts", async (request, reply) => {
@@ -1988,7 +1992,7 @@ print(files_written)
         workspaceId,
         enabledOnly: optionalBoolean(query.enabled_only, false)
       })
-      .map((item) => cronjobPayload(item));
+      .map((item: CronjobRecord) => cronjobPayload(item));
     return { jobs, count: jobs.length };
   });
 
@@ -2060,7 +2064,7 @@ print(files_written)
     if (!workspaceId) {
       return sendError(reply, 400, "workspace_id is required");
     }
-    const proposals = store.listTaskProposals({ workspaceId }).map((item) => taskProposalPayload(item));
+    const proposals = store.listTaskProposals({ workspaceId }).map((item: TaskProposalRecord) => taskProposalPayload(item));
     return { proposals, count: proposals.length };
   });
 
@@ -2070,7 +2074,9 @@ print(files_written)
     if (!workspaceId) {
       return sendError(reply, 400, "workspace_id is required");
     }
-    const proposals = store.listUnreviewedTaskProposals({ workspaceId }).map((item) => taskProposalPayload(item));
+    const proposals = store
+      .listUnreviewedTaskProposals({ workspaceId })
+      .map((item: TaskProposalRecord) => taskProposalPayload(item));
     return { proposals, count: proposals.length };
   });
 
@@ -2088,7 +2094,7 @@ print(files_written)
     const stream = Readable.from(
       (async function* () {
         const seenProposalIds = new Set(
-          store.listUnreviewedTaskProposals({ workspaceId }).map((item) => item.proposalId)
+          store.listUnreviewedTaskProposals({ workspaceId }).map((item: TaskProposalRecord) => item.proposalId)
         );
         yield sseComment("connected");
         while (true) {
@@ -2174,11 +2180,14 @@ print(files_written)
         includeHistory: true,
         afterEventId
       })
-      .map((item) => outputEventPayload(item));
+      .map((item: OutputEventRecord) => outputEventPayload(item));
     return {
       items,
       count: items.length,
-      last_event_id: items.reduce<number>((maxId, item) => Math.max(maxId, Number(item.id)), afterEventId)
+      last_event_id: items.reduce<number>(
+        (maxId: number, item: Record<string, unknown>) => Math.max(maxId, Number(item.id)),
+        afterEventId
+      )
     };
   });
 
