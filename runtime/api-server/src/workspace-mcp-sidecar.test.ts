@@ -152,23 +152,22 @@ test("startWorkspaceMcpSidecar terminates stale state, spawns, and persists the 
   assert.equal(unrefCalled, true);
   assert.ok(spawnCall);
   const capturedSpawnCall = spawnCall as { command: string; args: string[]; options: SpawnOptions };
-  assert.equal(capturedSpawnCall.command, "python3");
-  assert.deepEqual(capturedSpawnCall.args.slice(0, 3), [
-    "-m",
-    "sandbox_agent_runtime.workspace_mcp_sidecar",
-    "--request-base64"
-  ]);
-  const decodedPythonRequest = JSON.parse(Buffer.from(capturedSpawnCall.args[3] ?? "", "base64").toString("utf8"));
-  assert.deepEqual(decodedPythonRequest, {
+  assert.equal(capturedSpawnCall.command, process.execPath);
+  assert.equal(capturedSpawnCall.args.includes("--request-base64"), true);
+  const requestIndex = capturedSpawnCall.args.indexOf("--request-base64");
+  assert.ok(requestIndex >= 0);
+  assert.match(capturedSpawnCall.args[requestIndex - 1] ?? "", /workspace-mcp-host\.(ts|mjs)$/);
+  const decodedHostRequest = JSON.parse(Buffer.from(capturedSpawnCall.args[requestIndex + 1] ?? "", "base64").toString("utf8"));
+  assert.deepEqual(decodedHostRequest, {
     workspace_dir: path.resolve(workspaceDir),
     catalog_json_base64: request.catalog_json_base64,
     host: "127.0.0.1",
     port: 24567,
-    server_name: request.physical_server_id
+    server_name: request.physical_server_id,
+    python_executable: request.python_executable
   });
   assert.equal(capturedSpawnCall.options.cwd, path.resolve(workspaceDir));
   assert.equal(capturedSpawnCall.options.detached, true);
-  assert.equal((capturedSpawnCall.options.env as NodeJS.ProcessEnv).PYTHONPATH, "/app");
   assert.equal(Array.isArray(capturedSpawnCall.options.stdio), true);
 
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, "workspace-mcp-sidecar-state.json"), "utf8"));

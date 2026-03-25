@@ -3,7 +3,7 @@ import net from "node:net";
 import path from "node:path";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { spawn } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const WORKSPACE_MCP_STATE_VERSION = 1;
 const WORKSPACE_MCP_READY_POLL_MS = 200;
@@ -45,12 +45,13 @@ export interface WorkspaceMcpSidecarCliResponse {
   reused: boolean;
 }
 
-type PythonWorkspaceMcpSidecarRequest = {
+type WorkspaceMcpHostCliRequest = {
   workspace_dir: string;
   catalog_json_base64: string;
   host: string;
   port: number;
   server_name: string;
+  python_executable: string;
 };
 
 function sanitizeId(value: string): string {
@@ -207,18 +208,32 @@ async function nextLocalPort(): Promise<number> {
 }
 
 function buildSidecarEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  const pythonpath = (env.PYTHONPATH ?? "").trim();
-  if (!pythonpath) {
-    env.PYTHONPATH = "/app";
-  } else if (!pythonpath.split(":").includes("/app")) {
-    env.PYTHONPATH = `/app:${pythonpath}`;
-  }
-  return env;
+  return { ...process.env };
 }
 
-function encodePythonWorkspaceMcpSidecarRequest(request: PythonWorkspaceMcpSidecarRequest): string {
+function encodeWorkspaceMcpHostRequest(request: WorkspaceMcpHostCliRequest): string {
   return Buffer.from(JSON.stringify(request), "utf8").toString("base64");
+}
+
+function workspaceMcpHostEntryPath(): string {
+  const currentFile = fileURLToPath(import.meta.url);
+  const extension = path.extname(currentFile);
+  return path.join(path.dirname(currentFile), `workspace-mcp-host${extension}`);
+}
+
+function workspaceMcpHostCommand(request: WorkspaceMcpHostCliRequest): { command: string; args: string[] } {
+  const entryPath = workspaceMcpHostEntryPath();
+  const encodedRequest = encodeWorkspaceMcpHostRequest(request);
+  if (path.extname(entryPath) === ".ts") {
+    return {
+      command: process.execPath,
+      args: ["--import", "tsx", entryPath, "--request-base64", encodedRequest]
+    };
+  }
+  return {
+    command: process.execPath,
+    args: [entryPath, "--request-base64", encodedRequest]
+  };
 }
 
 function defaultSpawnProcess(
@@ -269,21 +284,17 @@ export async function startWorkspaceMcpSidecar(
   const stderrFd = fs.openSync(stderrLogPath, "a");
   let child: Pick<ChildProcess, "pid" | "unref">;
   try {
-    const pythonRequest = encodePythonWorkspaceMcpSidecarRequest({
+    const hostCommand = workspaceMcpHostCommand({
       workspace_dir: workspaceDir,
       catalog_json_base64: request.catalog_json_base64,
       host: "127.0.0.1",
       port,
-      server_name: request.physical_server_id
+      server_name: request.physical_server_id,
+      python_executable: request.python_executable
     });
     child = (deps.spawnProcess ?? defaultSpawnProcess)(
-      request.python_executable,
-      [
-        "-m",
-        "sandbox_agent_runtime.workspace_mcp_sidecar",
-        "--request-base64",
-        pythonRequest
-      ],
+      hostCommand.command,
+      hostCommand.args,
       {
         cwd: workspaceDir,
         env: buildSidecarEnv(),

@@ -12,6 +12,7 @@ export default defineConfig({
     "src/workspace-runtime-plan.ts",
     "src/opencode-runtime-config.ts",
     "src/opencode-skills.ts",
+    "src/workspace-mcp-host.ts",
     "src/workspace-mcp-sidecar.ts",
     "src/opencode-sidecar.ts"
   ],
