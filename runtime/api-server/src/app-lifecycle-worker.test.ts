@@ -328,6 +328,61 @@ test("startShellLifecycleAppTarget runs lifecycle.start and waits healthy", asyn
   assert.equal(seenEnv?.HOLABOSS_USER_ID, "user-1");
 });
 
+test("startShellLifecycleAppTarget runs lifecycle.setup before lifecycle.start", async () => {
+  const appDir = fs.mkdtempSync(path.join(os.tmpdir(), "hb-shell-app-setup-"));
+  const calls: Array<{ key: string; cwd?: string }> = [];
+  let started = false;
+  const spawnStub = ((command: string, args?: readonly string[], options?: { cwd?: string; shell?: boolean }) => {
+    const key = `${command} ${(args ?? []).join(" ")}`.trim();
+    calls.push({ key, cwd: options?.cwd });
+    if (key === "npm run start") {
+      started = true;
+    }
+    const child = new EventEmitter() as EventEmitter & {
+      stderr: EventEmitter & { setEncoding: (encoding: string) => void };
+      stdout: EventEmitter & { setEncoding: (encoding: string) => void };
+      kill: () => void;
+      exitCode?: number | null;
+    };
+    child.stderr = Object.assign(new EventEmitter(), { setEncoding: (_encoding: string) => {} });
+    child.stdout = Object.assign(new EventEmitter(), { setEncoding: (_encoding: string) => {} });
+    child.kill = () => {};
+    queueMicrotask(() => {
+      child.exitCode = 0;
+      child.emit("close", 0);
+    });
+    return child;
+  }) as typeof import("node:child_process").spawn;
+
+  await startShellLifecycleAppTarget({
+    appId: "app-a",
+    appDir,
+    resolvedApp: {
+      appId: "app-a",
+      mcp: { transport: "http-sse", port: 4100, path: "/mcp" },
+      healthCheck: { path: "/health", timeoutS: 1, intervalS: 0.01 },
+      envContract: [],
+      startCommand: "",
+      baseDir: "apps/app-a",
+      lifecycle: { setup: "npm run build", start: "npm run start", stop: "npm run stop" }
+    },
+    httpPort: 18081,
+    mcpPort: 13101,
+    spawnImpl: spawnStub,
+    fetchImpl: (async () => {
+      if (!started) {
+        throw new Error("app not started yet");
+      }
+      return new Response("", { status: 200 });
+    }) as typeof fetch
+  });
+
+  assert.deepEqual(calls, [
+    { key: "npm run build", cwd: appDir },
+    { key: "npm run start", cwd: appDir }
+  ]);
+});
+
 test("stopShellLifecycleAppTarget runs lifecycle.stop and clears tracked shell state", async () => {
   const appDir = fs.mkdtempSync(path.join(os.tmpdir(), "hb-shell-stop-"));
   const calls: Array<{ key: string; cwd?: string }> = [];
@@ -442,6 +497,61 @@ test("startSubprocessAppTarget runs startCommand and waits healthy", async () =>
     ports: { http: 18081, mcp: 13101 }
   });
   assert.deepEqual(calls, [{ key: "npm run legacy-start", cwd: appDir }]);
+});
+
+test("startSubprocessAppTarget runs lifecycle.setup before startCommand", async () => {
+  const appDir = fs.mkdtempSync(path.join(os.tmpdir(), "hb-subprocess-setup-"));
+  const calls: Array<{ key: string; cwd?: string }> = [];
+  let started = false;
+  const spawnStub = ((command: string, args?: readonly string[], options?: { cwd?: string; shell?: boolean }) => {
+    const key = `${command} ${(args ?? []).join(" ")}`.trim();
+    calls.push({ key, cwd: options?.cwd });
+    if (key === "npm run legacy-start") {
+      started = true;
+    }
+    const child = new EventEmitter() as EventEmitter & {
+      stderr: EventEmitter & { setEncoding: (encoding: string) => void };
+      stdout: EventEmitter & { setEncoding: (encoding: string) => void };
+      kill: () => void;
+      exitCode?: number | null;
+    };
+    child.stderr = Object.assign(new EventEmitter(), { setEncoding: (_encoding: string) => {} });
+    child.stdout = Object.assign(new EventEmitter(), { setEncoding: (_encoding: string) => {} });
+    child.kill = () => {};
+    queueMicrotask(() => {
+      child.exitCode = 0;
+      child.emit("close", 0);
+    });
+    return child;
+  }) as typeof import("node:child_process").spawn;
+
+  await startSubprocessAppTarget({
+    appId: "app-legacy",
+    appDir,
+    resolvedApp: {
+      appId: "app-legacy",
+      mcp: { transport: "http-sse", port: 4100, path: "/mcp" },
+      healthCheck: { path: "/health", timeoutS: 1, intervalS: 0.01 },
+      envContract: [],
+      startCommand: "npm run legacy-start",
+      baseDir: "apps/app-legacy",
+      lifecycle: { setup: "npm run build", start: "", stop: "" }
+    },
+    httpPort: 18081,
+    mcpPort: 13101,
+    spawnImpl: spawnStub,
+    fetchImpl: (async () => {
+      if (!started) {
+        throw new Error("app not started yet");
+      }
+      return new Response("", { status: 200 });
+    }) as typeof fetch
+  });
+
+  assert.deepEqual(calls, [
+    { key: "npm run build", cwd: appDir },
+    { key: "npm run legacy-start", cwd: appDir }
+  ]);
 });
 
 test("stopSubprocessAppTarget kills tracked process and clears ports", async () => {

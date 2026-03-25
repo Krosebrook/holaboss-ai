@@ -202,6 +202,32 @@ function buildShellLifecycleEnv(
   return env;
 }
 
+async function runLifecycleSetup(params: {
+  appId: string;
+  appDir: string;
+  resolvedApp: ResolvedApplicationRuntime;
+  httpPort: number;
+  mcpPort: number;
+  holabossUserId?: string;
+  spawnImpl?: SpawnLike;
+}): Promise<void> {
+  const setupCommand = params.resolvedApp.lifecycle.setup.trim();
+  if (!setupCommand) {
+    return;
+  }
+  const spawnImpl = params.spawnImpl ?? spawn;
+  const result = await runSpawn(spawnImpl, setupCommand, [], {
+    cwd: params.appDir,
+    env: buildShellLifecycleEnv(params),
+    captureStderr: true
+  });
+  if (result.code !== 0) {
+    throw new Error(
+      `App '${params.appId}' lifecycle.setup failed (rc=${result.code}): ${result.stderr.slice(0, 500)}`
+    );
+  }
+}
+
 async function killTrackedProcess(proc: ChildLike, timeoutMs: number): Promise<void> {
   if (typeof proc.exitCode === "number") {
     return;
@@ -459,6 +485,8 @@ export async function startShellLifecycleAppTarget(params: {
     };
   }
 
+  await runLifecycleSetup(params);
+
   const child = spawnImpl(lifecycleStart, [], {
     cwd: params.appDir,
     env: buildShellLifecycleEnv(params),
@@ -501,6 +529,8 @@ export async function startSubprocessAppTarget(params: {
       ports: { http: params.httpPort, mcp: params.mcpPort }
     };
   }
+
+  await runLifecycleSetup(params);
 
   const child = spawnImpl(startCommand, [], {
     cwd: params.appDir,
