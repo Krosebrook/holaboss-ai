@@ -33,6 +33,7 @@ const GITHUB_RELEASES_REPO = "hola-boss-oss";
 const APP_UPDATE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 const APP_UPDATE_REQUEST_TIMEOUT_MS = 15000;
 const APP_UPDATE_MACOS_ASSET_NAME = "Holaboss-macos-arm64.dmg";
+const LOCAL_OSS_TEMPLATE_USER_ID = "local-oss";
 
 interface DirectoryEntryPayload {
   name: string;
