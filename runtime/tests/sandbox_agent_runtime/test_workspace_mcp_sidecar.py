@@ -2,33 +2,39 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import base64
+import json
 
 from sandbox_agent_runtime import workspace_mcp_sidecar
+from sandbox_agent_runtime.runtime_config.errors import WorkspaceRuntimeConfigError
 
 
-def test_decode_enabled_tool_ids_defaults_to_empty_set() -> None:
-    enabled = workspace_mcp_sidecar._decode_enabled_tool_ids("")
-    assert enabled == frozenset()
+def test_request_from_args_decodes_request_base64() -> None:
+    encoded = base64.b64encode(
+        json.dumps(
+            {
+                "workspace_dir": "/tmp/workspace-1",
+                "catalog_json_base64": "e30=",
+                "host": "127.0.0.1",
+                "port": 8080,
+                "server_name": "workspace__abc123",
+            }
+        ).encode("utf-8")
+    ).decode("utf-8")
+
+    args = workspace_mcp_sidecar._decode_request(workspace_mcp_sidecar._parse_args(["--request-base64", encoded]))
+
+    assert args.workspace_dir == "/tmp/workspace-1"
+    assert args.catalog_json_base64 == "e30="
+    assert args.host == "127.0.0.1"
+    assert args.port == 8080
+    assert args.server_name == "workspace__abc123"
 
 
-def test_register_builtin_workspace_tools_is_noop(tmp_path: Path) -> None:
-    class _FakeMcp:
-        def tool(self, *, name: str):
-            del name
-
-            def _decorator(func):
-                return func
-
-            return _decorator
-
-    registered = workspace_mcp_sidecar._register_builtin_workspace_tools(
-        mcp=_FakeMcp(),
-        workspace_dir=tmp_path,
-        workspace_id="workspace-1",
-        enabled_tool_ids=frozenset({
-            "workspace.memory_search",
-            "workspace.cronjobs_list",
-        }),
-    )
-    assert registered == 0
+def test_request_from_args_rejects_invalid_request_base64() -> None:
+    try:
+        workspace_mcp_sidecar._decode_request(workspace_mcp_sidecar._parse_args(["--request-base64", "not-base64"]))
+    except WorkspaceRuntimeConfigError as exc:
+        assert exc.path == "request_base64"
+    else:
+        raise AssertionError("expected WorkspaceRuntimeConfigError")

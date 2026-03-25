@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import os
-import sqlite3
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sandbox_agent_runtime.ts_bridge import run_ts_json_cli, runtime_node_bin, runtime_root_dir
-from sandbox_agent_runtime.workspace_scope import SANDBOX_ROOT, WORKSPACE_ROOT, sanitize_workspace_id
+from sandbox_agent_runtime.ts_bridge import run_ts_json_cli, runtime_root_dir
+from sandbox_agent_runtime.workspace_scope import SANDBOX_ROOT, WORKSPACE_ROOT
 
 _RUNTIME_DB_PATH_ENV = "HOLABOSS_RUNTIME_DB_PATH"
 _TS_STATE_STORE_FLAG_ENV = "HOLABOSS_RUNTIME_USE_TS_STATE_STORE"
@@ -109,18 +107,6 @@ def _ts_state_store_request_options() -> dict[str, Any]:
     }
 
 
-def _ts_state_store_command(*, operation: str, encoded: str) -> list[str] | None:
-    dist_entry = _state_store_root_dir() / "dist" / "cli.mjs"
-    if dist_entry.is_file():
-        return [runtime_node_bin(), str(dist_entry), operation, "--request-base64", encoded]
-
-    source_entry = _state_store_root_dir() / "src" / "cli.ts"
-    if source_entry.is_file():
-        return [runtime_node_bin(), "--import", "tsx", str(source_entry), operation, "--request-base64", encoded]
-
-    return None
-
-
 def _ts_state_store_call(*, operation: str, payload: dict[str, Any]) -> Any:
     if not _ts_state_store_enabled():
         raise RuntimeError(
@@ -149,93 +135,15 @@ def runtime_db_path() -> Path:
     return Path(SANDBOX_ROOT) / "state" / "runtime.db"
 
 
-def _default_workspace_dir(workspace_id: str) -> Path:
-    return Path(WORKSPACE_ROOT) / sanitize_workspace_id(workspace_id)
-
-
 def workspace_dir(workspace_id: str) -> Path:
-    _ensure_workspace_metadata_ready()
-    registered = _workspace_path_from_registry(workspace_id)
-    if registered is not None:
-        path = Path(registered)
-        if path.is_dir():
-            return path
-
-    discovered = _discover_workspace_path(workspace_id)
-    if discovered is not None:
-        _update_workspace_path(workspace_id, discovered)
-        return discovered
-
-    return _default_workspace_dir(workspace_id)
+    resolved = _ts_state_store_call(operation="workspace-dir", payload={"workspace_id": workspace_id})
+    if not isinstance(resolved, str):
+        raise RuntimeError("invalid TypeScript state-store workspace_dir response")
+    return Path(resolved)
 
 
 def workspace_identity_path(workspace_id: str) -> Path:
     return workspace_dir(workspace_id) / _WORKSPACE_RUNTIME_DIRNAME / _WORKSPACE_IDENTITY_FILENAME
-
-
-def _ensure_workspace_metadata_ready() -> None:
-    _ts_state_store_call(operation="list-workspaces", payload={"include_deleted": True})
-
-
-@contextmanager
-def runtime_db_connection() -> Any:
-    db_path = runtime_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield conn
-    finally:
-        conn.commit()
-        conn.close()
-
-
-def ensure_runtime_db_schema(conn: sqlite3.Connection) -> None:
-    del conn
-    _ensure_workspace_metadata_ready()
-
-
-def _workspace_path_from_registry(workspace_id: str) -> str | None:
-    if not runtime_db_path().exists():
-        return None
-    with runtime_db_connection() as conn:
-        try:
-            row = conn.execute("SELECT workspace_path FROM workspaces WHERE id = ? LIMIT 1", (workspace_id,)).fetchone()
-        except sqlite3.OperationalError:
-            return None
-    if row is None or row["workspace_path"] is None:
-        return None
-    value = str(row["workspace_path"]).strip()
-    return value or None
-
-
-def _discover_workspace_path(workspace_id: str) -> Path | None:
-    root = Path(WORKSPACE_ROOT)
-    if not root.is_dir():
-        return None
-    for child in root.iterdir():
-        if not child.is_dir():
-            continue
-        identity_path = child / _WORKSPACE_RUNTIME_DIRNAME / _WORKSPACE_IDENTITY_FILENAME
-        if not identity_path.is_file():
-            continue
-        raw = identity_path.read_text(encoding="utf-8").strip()
-        if raw == workspace_id:
-            return child
-    return None
-
-
-def _update_workspace_path(workspace_id: str, workspace_path: Path) -> None:
-    if not runtime_db_path().exists():
-        return
-    with runtime_db_connection() as conn:
-        try:
-            conn.execute("UPDATE workspaces SET workspace_path = ? WHERE id = ?", (str(workspace_path), workspace_id))
-            conn.commit()
-        except sqlite3.OperationalError:
-            return
 
 
 def _require_dict(value: Any, *, operation: str) -> dict[str, Any]:

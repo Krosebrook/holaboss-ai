@@ -11,7 +11,6 @@ const WORKSPACE_MCP_READY_POLL_MS = 200;
 type SidecarStateEntry = {
   workspace_id: string;
   sandbox_id: string;
-  logical_server_id: string;
   physical_server_id: string;
   url: string;
   pid: number;
@@ -41,12 +40,10 @@ export interface WorkspaceMcpSidecarCliRequest {
   timeout_ms: number;
   readiness_timeout_s: number;
   catalog_json_base64: string;
-  enabled_tool_ids_json_base64: string;
   python_executable: string;
 }
 
 export interface WorkspaceMcpSidecarCliResponse {
-  logical_server_id: string;
   physical_server_id: string;
   sandbox_id: string;
   url: string;
@@ -54,6 +51,14 @@ export interface WorkspaceMcpSidecarCliResponse {
   pid: number;
   reused: boolean;
 }
+
+type PythonWorkspaceMcpSidecarRequest = {
+  workspace_dir: string;
+  catalog_json_base64: string;
+  host: string;
+  port: number;
+  server_name: string;
+};
 
 function sanitizeId(value: string): string {
   return value.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "workspace";
@@ -219,6 +224,10 @@ function buildSidecarEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+function encodePythonWorkspaceMcpSidecarRequest(request: PythonWorkspaceMcpSidecarRequest): string {
+  return Buffer.from(JSON.stringify(request), "utf8").toString("base64");
+}
+
 function defaultSpawnProcess(
   command: string,
   args: string[],
@@ -247,7 +256,6 @@ export async function startWorkspaceMcpSidecar(
       (await (deps.isReady ?? workspaceMcpIsReady)(stateEntry.url))
     ) {
       return {
-        logical_server_id: "workspace",
         physical_server_id: request.physical_server_id,
         sandbox_id: request.sandbox_id,
         url: stateEntry.url,
@@ -273,25 +281,20 @@ export async function startWorkspaceMcpSidecar(
   const stderrFd = fs.openSync(stderrLogPath, "a");
   let child: Pick<ChildProcess, "pid" | "unref">;
   try {
+    const pythonRequest = encodePythonWorkspaceMcpSidecarRequest({
+      workspace_dir: workspaceDir,
+      catalog_json_base64: request.catalog_json_base64,
+      host: "127.0.0.1",
+      port,
+      server_name: request.physical_server_id
+    });
     child = (deps.spawnProcess ?? defaultSpawnProcess)(
       request.python_executable,
       [
         "-m",
         "sandbox_agent_runtime.workspace_mcp_sidecar",
-        "--workspace-dir",
-        workspaceDir,
-        "--workspace-id",
-        request.workspace_id,
-        "--catalog-json-base64",
-        request.catalog_json_base64,
-        "--enabled-tool-ids-json-base64",
-        request.enabled_tool_ids_json_base64,
-        "--host",
-        "127.0.0.1",
-        "--port",
-        String(port),
-        "--server-name",
-        request.physical_server_id
+        "--request-base64",
+        pythonRequest
       ],
       {
         cwd: workspaceDir,
@@ -314,7 +317,6 @@ export async function startWorkspaceMcpSidecar(
   stateEntries[request.physical_server_id] = {
     workspace_id: request.workspace_id,
     sandbox_id: request.sandbox_id,
-    logical_server_id: "workspace",
     physical_server_id: request.physical_server_id,
     url,
     pid: child.pid ?? 0,
@@ -323,7 +325,6 @@ export async function startWorkspaceMcpSidecar(
   };
   writeWorkspaceMcpSidecarState(workspaceDir, stateEntries);
   return {
-    logical_server_id: "workspace",
     physical_server_id: request.physical_server_id,
     sandbox_id: request.sandbox_id,
     url,

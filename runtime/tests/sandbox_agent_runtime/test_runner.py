@@ -28,11 +28,13 @@ from sandbox_agent_runtime.runner import (
     _workspace_mcp_failure_detail,
     _workspace_mcp_log_path,
 )
-from sandbox_agent_runtime.runtime_config.models import ResolvedMcpServerConfig, ResolvedMcpToolRef
-from sandbox_agent_runtime.runtime_config_adapter import (
+from sandbox_agent_runtime.runtime_config import (
     CompiledWorkspaceRuntimePlan,
     WorkspaceGeneralMemberConfig,
     WorkspaceGeneralSingleConfig,
+    ResolvedMcpServerConfig,
+    ResolvedMcpToolRef,
+    WorkspaceMcpCatalogEntry,
 )
 
 _RUNTIME_EXEC_CONTEXT_KEY = "_sandbox_runtime_exec_v1"
@@ -1441,7 +1443,8 @@ def _single_plan(
     *,
     servers: tuple[ResolvedMcpServerConfig, ...] = (),
     tools: tuple[ResolvedMcpToolRef, ...] = (),
-    output_schemas: dict[str, type[BaseModel]] | None = None,
+    catalog: tuple[WorkspaceMcpCatalogEntry, ...] = (),
+    output_schemas: dict[str, dict[str, object]] | None = None,
 ) -> CompiledWorkspaceRuntimePlan:
     general_member = WorkspaceGeneralMemberConfig(
         id="workspace.general",
@@ -1455,7 +1458,7 @@ def _single_plan(
         resolved_prompts={"workspace.general": "You are concise."},
         resolved_mcp_servers=servers,
         resolved_mcp_tool_refs=tools,
-        workspace_mcp_catalog=(),
+        workspace_mcp_catalog=catalog,
         resolved_output_schemas=output_schemas or {},
         config_checksum="checksum-1",
     )
@@ -1473,7 +1476,7 @@ async def test_build_opencode_runtime_config_maps_workspace_tools_and_schema(
         ResolvedMcpToolRef(tool_id="workspace.read_file", server_id="workspace", tool_name="read_file"),
         ResolvedMcpToolRef(tool_id="remote.lookup", server_id="remote", tool_name="lookup"),
     )
-    plan = _single_plan(tools=tools, output_schemas={"workspace.general": _HealthPlan})
+    plan = _single_plan(tools=tools, output_schemas={"workspace.general": _HealthPlan.model_json_schema()})
     request = RunnerRequest(
         holaboss_user_id="user-1",
         workspace_id="workspace-1",
@@ -1527,24 +1530,26 @@ async def test_build_opencode_runtime_config_maps_workspace_tools_and_schema(
     assert config.tools == expected_tools
     assert config.workspace_tool_ids == ("workspace.read_file", "remote.lookup")
     assert config.output_schema_member_id == "workspace.general"
-    assert config.output_schema_model is _HealthPlan
+    assert config.output_schema_model == _HealthPlan.model_json_schema()
     assert config.output_format is not None
     assert config.output_format["type"] == "json_schema"
     assert "checks" in config.output_format["schema"]["properties"]
 
 
-def test_workspace_sidecar_enabled_tool_ids_payload_only_includes_workspace_tools() -> None:
-    tools = (
-        ResolvedMcpToolRef(tool_id="workspace.echo", server_id="workspace", tool_name="echo"),
-        ResolvedMcpToolRef(tool_id="remote.lookup", server_id="remote", tool_name="lookup"),
+def test_workspace_mcp_catalog_fingerprint_tracks_workspace_catalog() -> None:
+    catalog = (
+        WorkspaceMcpCatalogEntry(
+            tool_id="workspace.echo",
+            tool_name="echo",
+            module_path="tools.echo",
+            symbol_name="run",
+        ),
     )
-    plan = _single_plan(tools=tools)
-    tool_ids = runner_module._workspace_sidecar_enabled_tool_ids(compiled_plan=plan)
-    assert tool_ids == ("workspace.echo",)
+    plan = _single_plan(catalog=catalog)
 
-    payload = runner_module._sidecar_enabled_tool_ids_payload(plan)
-    decoded = json.loads(base64.b64decode(payload.encode("utf-8")).decode("utf-8"))
-    assert decoded == ["workspace.echo"]
+    fingerprint = runner_module._workspace_mcp_catalog_fingerprint(plan)
+
+    assert fingerprint
 
 
 @pytest.mark.asyncio
@@ -1556,14 +1561,24 @@ async def test_start_workspace_mcp_sidecar_invokes_local_ts_cli(
         ResolvedMcpServerConfig(
             server_id="workspace",
             type="local",
-            command=("python", "-m", "sandbox_agent_runtime.workspace_mcp_sidecar"),
             timeout_ms=4321,
         ),
     )
     tools = (
         ResolvedMcpToolRef(tool_id="workspace.echo", server_id="workspace", tool_name="echo"),
     )
-    plan = _single_plan(servers=servers, tools=tools)
+    plan = _single_plan(
+        servers=servers,
+        tools=tools,
+        catalog=(
+            WorkspaceMcpCatalogEntry(
+                tool_id="workspace.echo",
+                tool_name="echo",
+                module_path="tools.echo",
+                symbol_name="run",
+            ),
+        ),
+    )
     workspace_dir = Path("/tmp/workspace-1")
     entry_path = tmp_path / "workspace-mcp-sidecar.mjs"
     entry_path.write_text("// test entry\n", encoding="utf-8")
@@ -1573,7 +1588,6 @@ async def test_start_workspace_mcp_sidecar_invokes_local_ts_cli(
         captured["command"] = command
         captured["kwargs"] = kwargs
         payload = {
-            "logical_server_id": "workspace",
             "physical_server_id": "workspace__abc123",
             "sandbox_id": "sandbox-1",
             "url": "http://127.0.0.1:4567/mcp",
@@ -1615,7 +1629,6 @@ async def test_start_workspace_mcp_sidecar_invokes_local_ts_cli(
     assert payload["physical_server_id"] == "workspace__abc123"
     assert payload["timeout_ms"] == 4321
     assert payload["python_executable"] == runner_module.sys.executable
-    assert payload["enabled_tool_ids_json_base64"]
     assert payload["catalog_json_base64"]
     assert captured["kwargs"] == {
         "cwd": str(workspace_dir),
@@ -1633,14 +1646,24 @@ async def test_start_workspace_mcp_sidecar_reports_cli_failure_detail(
         ResolvedMcpServerConfig(
             server_id="workspace",
             type="local",
-            command=("python", "-m", "sandbox_agent_runtime.workspace_mcp_sidecar"),
             timeout_ms=10000,
         ),
     )
     tools = (
         ResolvedMcpToolRef(tool_id="workspace.echo", server_id="workspace", tool_name="echo"),
     )
-    plan = _single_plan(servers=servers, tools=tools)
+    plan = _single_plan(
+        servers=servers,
+        tools=tools,
+        catalog=(
+            WorkspaceMcpCatalogEntry(
+                tool_id="workspace.echo",
+                tool_name="echo",
+                module_path="tools.echo",
+                symbol_name="run",
+            ),
+        ),
+    )
     entry_path = tmp_path / "workspace-mcp-sidecar.mjs"
     entry_path.write_text("// test entry\n", encoding="utf-8")
     physical_server_id = "workspace__abc123"
@@ -1683,7 +1706,6 @@ async def test_stop_workspace_mcp_sidecar_terminates_only_nonreused_pid(
 
     await _stop_workspace_mcp_sidecar(
         runner_module._RunningWorkspaceMcpSidecar(
-            logical_server_id="workspace",
             physical_server_id="workspace__abc123",
             sandbox_id="sandbox-1",
             url="http://127.0.0.1:4567/mcp",
@@ -1694,7 +1716,6 @@ async def test_stop_workspace_mcp_sidecar_terminates_only_nonreused_pid(
     )
     await _stop_workspace_mcp_sidecar(
         runner_module._RunningWorkspaceMcpSidecar(
-            logical_server_id="workspace",
             physical_server_id="workspace__abc123",
             sandbox_id="sandbox-1",
             url="http://127.0.0.1:4567/mcp",
@@ -1720,7 +1741,6 @@ async def test_build_opencode_runtime_config_maps_workspace_tools_to_physical_se
         ResolvedMcpServerConfig(
             server_id="workspace",
             type="local",
-            command=("python", "-m", "sandbox_agent_runtime.workspace_mcp_sidecar"),
             timeout_ms=10000,
         ),
         ResolvedMcpServerConfig(server_id="remote", type="remote", url="https://example.com/mcp", timeout_ms=10000),
@@ -1784,7 +1804,6 @@ def test_mcp_server_id_map_assigns_stable_workspace_physical_id() -> None:
         ResolvedMcpServerConfig(
             server_id="workspace",
             type="local",
-            command=("python", "-m", "sandbox_agent_runtime.workspace_mcp_sidecar"),
             timeout_ms=10000,
         ),
     )

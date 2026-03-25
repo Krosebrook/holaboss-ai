@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -18,20 +19,74 @@ logging.basicConfig(level=os.getenv("SANDBOX_AGENT_LOG_LEVEL", "INFO"))
 logger = logging.getLogger("workspace_mcp_sidecar")
 
 
-def _parse_args(argv: list[str]) -> argparse.Namespace:
+@dataclass(frozen=True)
+class WorkspaceMcpSidecarRequest:
+    workspace_dir: str
+    catalog_json_base64: str
+    host: str
+    port: int
+    server_name: str
+
+
+def _parse_args(argv: list[str]) -> str:
     parser = argparse.ArgumentParser(description="Workspace MCP sidecar for runtime-local workspace tools")
-    parser.add_argument("--workspace-dir", required=True, help="Absolute workspace directory path")
-    parser.add_argument("--catalog-json-base64", required=True, help="Base64-encoded JSON array of catalog entries")
-    parser.add_argument(
-        "--enabled-tool-ids-json-base64",
-        default="",
-        help="Base64-encoded JSON array of enabled workspace tool ids",
+    parser.add_argument("--request-base64", required=True, help="Base64-encoded JSON request payload")
+    parsed = parser.parse_args(argv)
+    return str(parsed.request_base64)
+
+
+def _decode_request_base64(encoded: str) -> dict[str, object]:
+    try:
+        raw = base64.b64decode(encoded.encode("utf-8"), validate=True).decode("utf-8")
+        payload = json.loads(raw)
+    except Exception as exc:
+        raise WorkspaceRuntimeConfigError(
+            code="workspace_mcp_sidecar_start_failed",
+            path="request_base64",
+            message=f"invalid sidecar request payload: {exc}",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise WorkspaceRuntimeConfigError(
+            code="workspace_mcp_sidecar_start_failed",
+            path="request_base64",
+            message="request payload must decode to an object",
+        )
+    return payload
+
+
+def _request_string(payload: dict[str, object], *, key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise WorkspaceRuntimeConfigError(
+            code="workspace_mcp_sidecar_start_failed",
+            path=key,
+            message=f"{key} is required",
+        )
+    return value
+
+
+def _request_port(payload: dict[str, object]) -> int:
+    value = payload.get("port")
+    if isinstance(value, bool):
+        value = None
+    if not isinstance(value, int) or value <= 0:
+        raise WorkspaceRuntimeConfigError(
+            code="workspace_mcp_sidecar_start_failed",
+            path="port",
+            message="port must be a positive integer",
+        )
+    return value
+
+
+def _decode_request(encoded: str) -> WorkspaceMcpSidecarRequest:
+    payload = _decode_request_base64(encoded)
+    return WorkspaceMcpSidecarRequest(
+        workspace_dir=_request_string(payload, key="workspace_dir"),
+        catalog_json_base64=_request_string(payload, key="catalog_json_base64"),
+        host=str(payload.get("host", "127.0.0.1") or "127.0.0.1"),
+        port=_request_port(payload),
+        server_name=str(payload.get("server_name", "workspace") or "workspace"),
     )
-    parser.add_argument("--workspace-id", default="", help="Workspace id bound to this sidecar process")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--server-name", default="workspace")
-    return parser.parse_args(argv)
 
 
 def _decode_catalog(encoded: str) -> tuple[WorkspaceMcpCatalogEntry, ...]:
@@ -62,7 +117,6 @@ def _decode_catalog(encoded: str) -> tuple[WorkspaceMcpCatalogEntry, ...]:
         entries.append(
             WorkspaceMcpCatalogEntry(
                 tool_id=str(item.get("tool_id", "")),
-                server_id=str(item.get("server_id", "workspace")),
                 tool_name=str(item.get("tool_name", "")),
                 module_path=str(item.get("module_path", "")),
                 symbol_name=str(item.get("symbol_name", "")),
@@ -82,82 +136,32 @@ def _workspace_path(value: str) -> Path:
     return path
 
 
-def _decode_enabled_tool_ids(encoded: str) -> frozenset[str]:
-    if not encoded:
-        return frozenset()
-    try:
-        raw = base64.b64decode(encoded.encode("utf-8"), validate=True).decode("utf-8")
-        payload = json.loads(raw)
-    except Exception as exc:
-        raise WorkspaceRuntimeConfigError(
-            code="workspace_mcp_sidecar_start_failed",
-            path="enabled_tool_ids_json_base64",
-            message=f"invalid enabled tool id payload: {exc}",
-        ) from exc
-    if not isinstance(payload, list):
-        raise WorkspaceRuntimeConfigError(
-            code="workspace_mcp_sidecar_start_failed",
-            path="enabled_tool_ids_json_base64",
-            message="enabled tool id payload must decode to a list",
-        )
-    tool_ids: set[str] = set()
-    for index, item in enumerate(payload):
-        if not isinstance(item, str) or not item.strip():
-            raise WorkspaceRuntimeConfigError(
-                code="workspace_mcp_sidecar_start_failed",
-                path=f"enabled_tool_ids_json_base64[{index}]",
-                message="enabled tool ids must be non-empty strings",
-            )
-        tool_ids.add(item.strip())
-    return frozenset(tool_ids)
-
-
-def _register_builtin_workspace_tools(
-    *,
-    mcp: FastMCP,
-    workspace_dir: Path,
-    workspace_id: str,
-    enabled_tool_ids: frozenset[str],
-) -> int:
-    del mcp, workspace_dir, workspace_id, enabled_tool_ids
-    return 0
-
-
 def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv or sys.argv[1:])
+    request = _decode_request(_parse_args(argv or sys.argv[1:]))
 
     try:
-        workspace_dir = _workspace_path(args.workspace_dir)
-        catalog = _decode_catalog(args.catalog_json_base64)
-        enabled_tool_ids = _decode_enabled_tool_ids(args.enabled_tool_ids_json_base64)
+        workspace_dir = _workspace_path(request.workspace_dir)
+        catalog = _decode_catalog(request.catalog_json_base64)
         loaded_tools = load_workspace_tools(workspace_dir=workspace_dir, catalog=catalog)
 
         mcp = FastMCP(
-            args.server_name,
-            host=args.host,
-            port=args.port,
+            request.server_name,
+            host=request.host,
+            port=request.port,
             json_response=True,
             stateless_http=True,
-        )
-        builtin_count = _register_builtin_workspace_tools(
-            mcp=mcp,
-            workspace_dir=workspace_dir,
-            workspace_id=args.workspace_id,
-            enabled_tool_ids=enabled_tool_ids,
         )
         for tool in loaded_tools:
             mcp.tool(name=tool.tool_name)(tool.callable_obj)
 
         logger.info(
             "Starting workspace MCP sidecar at %s:%s with %s tools",
-            args.host,
-            args.port,
-            len(loaded_tools) + builtin_count,
+            request.host,
+            request.port,
+            len(loaded_tools),
             extra={
                 "event": "workspace_mcp.sidecar.start",
                 "outcome": "success",
-                "workspace_id": args.workspace_id,
-                "builtin_tool_count": builtin_count,
                 "workspace_catalog_tool_count": len(loaded_tools),
             },
         )

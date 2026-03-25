@@ -102,6 +102,28 @@ test("handleRequest maps workspace CRUD operations to snake_case payloads", () =
   assert.equal(deleted.status, "deleted");
 });
 
+test("handleRequest returns the resolved workspace directory", () => {
+  const root = makeTempDir("hb-state-store-cli-");
+  const options = {
+    dbPath: path.join(root, "runtime.db"),
+    workspaceRoot: path.join(root, "workspace")
+  };
+
+  handleRequest("create-workspace", {
+    options,
+    workspace_id: "workspace-1",
+    name: "Workspace 1",
+    harness: "opencode"
+  });
+
+  const resolved = handleRequest("workspace-dir", {
+    options,
+    workspace_id: "workspace-1"
+  });
+
+  assert.equal(resolved, path.join(options.workspaceRoot, "workspace-1"));
+});
+
 test("handleRequest maps output event operations to snake_case payloads", () => {
   const root = makeTempDir("hb-state-store-cli-");
   const options = {

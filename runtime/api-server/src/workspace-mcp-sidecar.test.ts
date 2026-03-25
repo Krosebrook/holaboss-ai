@@ -33,7 +33,6 @@ function makeRequest(workspaceDir: string) {
     timeout_ms: 45000,
     readiness_timeout_s: 2,
     catalog_json_base64: Buffer.from("{}", "utf8").toString("base64"),
-    enabled_tool_ids_json_base64: Buffer.from("[]", "utf8").toString("base64"),
     python_executable: "python3"
   } as const;
 }
@@ -52,7 +51,6 @@ test("startWorkspaceMcpSidecar reuses a ready persisted sidecar", async () => {
           [request.physical_server_id]: {
             workspace_id: request.workspace_id,
             sandbox_id: request.sandbox_id,
-            logical_server_id: "workspace",
             physical_server_id: request.physical_server_id,
             url: "http://127.0.0.1:9000/mcp",
             pid: 4321,
@@ -85,7 +83,6 @@ test("startWorkspaceMcpSidecar reuses a ready persisted sidecar", async () => {
 
   assert.equal(spawned, false);
   assert.deepEqual(result, {
-    logical_server_id: "workspace",
     physical_server_id: request.physical_server_id,
     sandbox_id: request.sandbox_id,
     url: "http://127.0.0.1:9000/mcp",
@@ -109,7 +106,6 @@ test("startWorkspaceMcpSidecar terminates stale state, spawns, and persists the 
           [request.physical_server_id]: {
             workspace_id: request.workspace_id,
             sandbox_id: request.sandbox_id,
-            logical_server_id: "workspace",
             physical_server_id: request.physical_server_id,
             url: "http://127.0.0.1:8000/mcp",
             pid: 111,
@@ -157,7 +153,6 @@ test("startWorkspaceMcpSidecar terminates stale state, spawns, and persists the 
   });
 
   assert.deepEqual(result, {
-    logical_server_id: "workspace",
     physical_server_id: request.physical_server_id,
     sandbox_id: request.sandbox_id,
     url: "http://127.0.0.1:24567/mcp",
@@ -170,24 +165,19 @@ test("startWorkspaceMcpSidecar terminates stale state, spawns, and persists the 
   assert.ok(spawnCall);
   const capturedSpawnCall = spawnCall as { command: string; args: string[]; options: SpawnOptions };
   assert.equal(capturedSpawnCall.command, "python3");
-  assert.deepEqual(capturedSpawnCall.args, [
+  assert.deepEqual(capturedSpawnCall.args.slice(0, 3), [
     "-m",
     "sandbox_agent_runtime.workspace_mcp_sidecar",
-    "--workspace-dir",
-    path.resolve(workspaceDir),
-    "--workspace-id",
-    request.workspace_id,
-    "--catalog-json-base64",
-    request.catalog_json_base64,
-    "--enabled-tool-ids-json-base64",
-    request.enabled_tool_ids_json_base64,
-    "--host",
-    "127.0.0.1",
-    "--port",
-    "24567",
-    "--server-name",
-    request.physical_server_id
+    "--request-base64"
   ]);
+  const decodedPythonRequest = JSON.parse(Buffer.from(capturedSpawnCall.args[3] ?? "", "base64").toString("utf8"));
+  assert.deepEqual(decodedPythonRequest, {
+    workspace_dir: path.resolve(workspaceDir),
+    catalog_json_base64: request.catalog_json_base64,
+    host: "127.0.0.1",
+    port: 24567,
+    server_name: request.physical_server_id
+  });
   assert.equal(capturedSpawnCall.options.cwd, path.resolve(workspaceDir));
   assert.equal(capturedSpawnCall.options.detached, true);
   assert.equal((capturedSpawnCall.options.env as NodeJS.ProcessEnv).PYTHONPATH, "/app");
@@ -200,7 +190,6 @@ test("startWorkspaceMcpSidecar terminates stale state, spawns, and persists the 
       [request.physical_server_id]: {
         workspace_id: request.workspace_id,
         sandbox_id: request.sandbox_id,
-        logical_server_id: "workspace",
         physical_server_id: request.physical_server_id,
         url: "http://127.0.0.1:24567/mcp",
         pid: 9876,
@@ -259,7 +248,6 @@ test("runWorkspaceMcpSidecarCli writes JSON response for a valid request", async
       async startSidecar(parsed) {
         assert.deepEqual(parsed, request);
         return {
-          logical_server_id: "workspace",
           physical_server_id: request.physical_server_id,
           sandbox_id: request.sandbox_id,
           url: "http://127.0.0.1:24567/mcp",
@@ -274,7 +262,6 @@ test("runWorkspaceMcpSidecarCli writes JSON response for a valid request", async
   assert.equal(exitCode, 0);
   assert.equal(stderr, "");
   assert.deepEqual(JSON.parse(stdout), {
-    logical_server_id: "workspace",
     physical_server_id: request.physical_server_id,
     sandbox_id: request.sandbox_id,
     url: "http://127.0.0.1:24567/mcp",

@@ -3077,6 +3077,9 @@ async function listMarketplaceTemplates(): Promise<TemplateListResponsePayload> 
 }
 
 async function listTaskProposals(workspaceId: string): Promise<TaskProposalListResponsePayload> {
+  if (!workspaceId.trim()) {
+    return { proposals: [], count: 0 };
+  }
   return requestRuntimeJson<TaskProposalListResponsePayload>({
     method: "GET",
     path: "/api/v1/task-proposals/unreviewed",
@@ -3664,7 +3667,6 @@ function renderMinimalWorkspaceYaml(workspace: WorkspaceRecordPayload, template:
     "  servers:",
     "    workspace:",
     '      type: "local"',
-    '      command: ["python", "-m", "sandbox_agent_runtime.workspace_mcp_sidecar"]',
     "      enabled: true",
     "      timeout_ms: 10000",
     "  catalog: {}",

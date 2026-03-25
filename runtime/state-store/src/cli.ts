@@ -192,6 +192,8 @@ export function handleRequest(operation: string, envelope: RequestEnvelope): Jso
   const store = new RuntimeStateStore(envelope.options ?? {});
   try {
     switch (operation) {
+      case "workspace-dir":
+        return store.workspaceDir(String(envelope.workspace_id));
       case "create-workspace":
         return toWorkspaceRecord(
           store.createWorkspace({

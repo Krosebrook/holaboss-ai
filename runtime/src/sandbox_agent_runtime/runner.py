@@ -45,7 +45,7 @@ from sandbox_agent_runtime.runner_models import (
     WorkspaceMcpSidecarCliRequest as _WorkspaceMcpSidecarCliRequest,
     WorkspaceMcpSidecarCliResponse as _WorkspaceMcpSidecarCliResponse,
 )
-from sandbox_agent_runtime.runtime_config_adapter import (
+from sandbox_agent_runtime.runtime_config import (
     CompiledWorkspaceRuntimePlan,
     WorkspaceGeneralSingleConfig,
     WorkspaceGeneralTeamConfig,
@@ -155,7 +155,7 @@ class _OpencodeRuntimeConfig:
     workspace_tool_ids: tuple[str, ...]
     mcp_servers: tuple[dict[str, Any], ...]
     output_schema_member_id: str | None
-    output_schema_model: type[BaseModel] | None
+    output_schema_model: dict[str, Any] | None
     output_format: dict[str, Any] | None
     workspace_config_checksum: str
     workspace_skill_ids: tuple[str, ...]
@@ -163,7 +163,6 @@ class _OpencodeRuntimeConfig:
 
 @dataclass(frozen=True)
 class _RunningWorkspaceMcpSidecar:
-    logical_server_id: str
     physical_server_id: str
     sandbox_id: str
     url: str
@@ -1027,7 +1026,6 @@ def _release_opencode_lock(*, lock_file: Any) -> None:
 
 def _workspace_mcp_catalog_fingerprint(compiled_plan: CompiledWorkspaceRuntimePlan) -> str:
     payload = {
-        "enabled_tool_ids": list(_workspace_sidecar_enabled_tool_ids(compiled_plan=compiled_plan)),
         "catalog": [
             {
                 "tool_id": entry.tool_id,
@@ -1044,15 +1042,6 @@ def _workspace_mcp_catalog_fingerprint(compiled_plan: CompiledWorkspaceRuntimePl
     }
     serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-
-def _workspace_sidecar_enabled_tool_ids(*, compiled_plan: CompiledWorkspaceRuntimePlan) -> tuple[str, ...]:
-    tool_ids = [
-        tool_ref.tool_id
-        for tool_ref in compiled_plan.resolved_mcp_tool_refs
-        if tool_ref.server_id == _WORKSPACE_MCP_SERVER_ID
-    ]
-    return tuple(dict.fromkeys(tool_ids))
 
 
 def _workspace_mcp_pid_alive(pid: int) -> bool:
@@ -1125,18 +1114,12 @@ def _sidecar_catalog_payload(compiled_plan: CompiledWorkspaceRuntimePlan) -> str
     payload = [
         {
             "tool_id": entry.tool_id,
-            "server_id": entry.server_id,
             "tool_name": entry.tool_name,
             "module_path": entry.module_path,
             "symbol_name": entry.symbol_name,
         }
         for entry in compiled_plan.workspace_mcp_catalog
     ]
-    return encode_json_base64(payload)
-
-
-def _sidecar_enabled_tool_ids_payload(compiled_plan: CompiledWorkspaceRuntimePlan) -> str:
-    payload = list(_workspace_sidecar_enabled_tool_ids(compiled_plan=compiled_plan))
     return encode_json_base64(payload)
 
 
@@ -1170,8 +1153,7 @@ async def _start_workspace_mcp_sidecar(
     sandbox_id: str,
     physical_server_id: str,
 ) -> _RunningWorkspaceMcpSidecar | None:
-    enabled_workspace_tool_ids = _workspace_sidecar_enabled_tool_ids(compiled_plan=compiled_plan)
-    if not enabled_workspace_tool_ids:
+    if not compiled_plan.workspace_mcp_catalog:
         return None
     entry_path = _ts_workspace_mcp_sidecar_entry_path()
     if not entry_path.is_file():
@@ -1198,7 +1180,6 @@ async def _start_workspace_mcp_sidecar(
             timeout_ms=timeout_ms,
             readiness_timeout_s=_WORKSPACE_MCP_READY_TIMEOUT_S,
             catalog_json_base64=_sidecar_catalog_payload(compiled_plan),
-            enabled_tool_ids_json_base64=_sidecar_enabled_tool_ids_payload(compiled_plan),
             python_executable=sys.executable,
         )
         returncode, stdout_text, stderr_text = await run_async_command_capture(
@@ -1240,13 +1221,12 @@ async def _start_workspace_mcp_sidecar(
             extra={
                 "event": "workspace_mcp.sidecar",
                 "outcome": "reuse" if response.reused else "start",
-                "logical_server_id": response.logical_server_id,
+                "logical_server_id": _WORKSPACE_MCP_SERVER_ID,
                 "physical_server_id": response.physical_server_id,
                 "sandbox_id": response.sandbox_id,
             },
         )
         return _RunningWorkspaceMcpSidecar(
-            logical_server_id=response.logical_server_id,
             physical_server_id=response.physical_server_id,
             sandbox_id=response.sandbox_id,
             url=response.url,
@@ -2061,8 +2041,8 @@ def _project_opencode_runtime_config_request(
 ) -> _OpencodeRuntimeConfigCliRequest:
     general_config = compiled_plan.general_config
     resolved_output_schemas = {
-        member_id: schema_model.model_json_schema()
-        for member_id, schema_model in compiled_plan.resolved_output_schemas.items()
+        member_id: dict(schema)
+        for member_id, schema in compiled_plan.resolved_output_schemas.items()
     }
     if isinstance(general_config, WorkspaceGeneralSingleConfig):
         return _OpencodeRuntimeConfigCliRequest(

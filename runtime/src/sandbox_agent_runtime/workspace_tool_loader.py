@@ -15,10 +15,7 @@ from sandbox_agent_runtime.runtime_config.models import WorkspaceMcpCatalogEntry
 
 @dataclass(slots=True, frozen=True)
 class LoadedWorkspaceTool:
-    tool_id: str
     tool_name: str
-    module_path: str
-    symbol_name: str
     callable_obj: Callable[..., Any]
 
 
@@ -39,10 +36,7 @@ def load_workspace_tools(
             symbol = _resolve_symbol(module=module, symbol_name=entry.symbol_name, tool_id=entry.tool_id)
             loaded.append(
                 LoadedWorkspaceTool(
-                    tool_id=entry.tool_id,
                     tool_name=entry.tool_name,
-                    module_path=entry.module_path,
-                    symbol_name=entry.symbol_name,
                     callable_obj=symbol,
                 )
             )
