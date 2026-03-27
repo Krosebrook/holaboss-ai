@@ -6,7 +6,11 @@ on:
       - dev
       - main
     paths:
+      - "runtime/api-server/**"
       - "runtime/deploy/**"
+      - "runtime/harness-host/**"
+      - "runtime/harnesses/**"
+      - "runtime/state-store/**"
       - ".github/workflows/publish-sandbox-images.yml"
 
 permissions:
