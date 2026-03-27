@@ -56,10 +56,48 @@ type ShellLifecyclePorts = { http: number; mcp: number };
 
 const shellLifecycleProcesses = new Map<string, ChildLike>();
 const shellLifecyclePorts = new Map<string, ShellLifecyclePorts>();
+const appStartOperations = new Map<string, Promise<AppLifecycleActionResult>>();
 
 export function appBuildHasCompletedSetup(status: string | null | undefined): boolean {
   const normalized = (status ?? "").trim().toLowerCase();
   return normalized === "completed" || normalized === "running" || normalized === "stopped";
+}
+
+function appStartKey(params: {
+  appId: string;
+  appDir?: string;
+  httpPort?: number;
+  mcpPort?: number;
+}): string {
+  if (params.appDir && params.appDir.trim()) {
+    return params.appDir;
+  }
+  return `${params.appId}:${params.httpPort ?? "http"}:${params.mcpPort ?? "mcp"}`;
+}
+
+async function withAppStartOperation(
+  params: {
+    appId: string;
+    appDir?: string;
+    httpPort?: number;
+    mcpPort?: number;
+  },
+  operation: () => Promise<AppLifecycleActionResult>
+): Promise<AppLifecycleActionResult> {
+  const key = appStartKey(params);
+  const inFlight = appStartOperations.get(key);
+  if (inFlight) {
+    return await inFlight;
+  }
+  const promise = (async () => await operation())();
+  appStartOperations.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    if (appStartOperations.get(key) === promise) {
+      appStartOperations.delete(key);
+    }
+  }
 }
 
 async function waitForExit(child: ChildLike, options: { captureStderr?: boolean } = {}): Promise<{ code: number; stderr: string }> {
@@ -417,65 +455,67 @@ export async function startComposeAppTarget(params: {
   spawnImpl?: SpawnLike;
   fetchImpl?: typeof fetch;
 }): Promise<AppLifecycleActionResult> {
-  const spawnImpl = params.spawnImpl ?? spawn;
-  const composeCmd = await findComposeCommand(spawnImpl);
-  if (!composeCmd) {
-    throw new Error(`App '${params.appId}' requires docker compose but it is not available`);
-  }
+  return await withAppStartOperation(params, async () => {
+    const spawnImpl = params.spawnImpl ?? spawn;
+    const composeCmd = await findComposeCommand(spawnImpl);
+    if (!composeCmd) {
+      throw new Error(`App '${params.appId}' requires docker compose but it is not available`);
+    }
 
-  if (await isAppHealthy(params)) {
+    if (await isAppHealthy(params)) {
+      return {
+        app_id: params.appId,
+        status: "started",
+        detail: "app started with lifecycle manager",
+        ports: { http: params.httpPort, mcp: params.mcpPort }
+      };
+    }
+
+    const composePath = composeFilePath(params.appDir);
+    if (!composePath) {
+      throw new Error(`App '${params.appId}' has no docker-compose.yml; cannot launch`);
+    }
+
+    patchComposePorts(composePath, {
+      containerHttpPort: 8080,
+      hostHttpPort: params.httpPort,
+      containerMcpPort: params.resolvedApp.mcp.port,
+      hostMcpPort: params.mcpPort
+    });
+    const composeEnv = buildShellLifecycleEnv(params);
+
+    const hasImages = await composeImagesExist(composeCmd, params.appDir, spawnImpl, composeEnv);
+    const upArgs = hasImages ? [...composeCmd.slice(1), "up", "-d"] : [...composeCmd.slice(1), "up", "--build", "-d"];
+    let upResult = await runSpawn(spawnImpl, composeCmd[0]!, upArgs, {
+      cwd: params.appDir,
+      env: composeEnv,
+      captureStderr: true
+    });
+    if (upResult.code !== 0) {
+      throw new Error(`App '${params.appId}' docker compose up failed (rc=${upResult.code}): ${upResult.stderr.slice(0, 500)}`);
+    }
+
+    try {
+      await waitHealthy(params);
+    } catch (error) {
+      upResult = await runSpawn(spawnImpl, composeCmd[0]!, [...composeCmd.slice(1), "up", "--build", "-d"], {
+        cwd: params.appDir,
+        env: composeEnv,
+        captureStderr: true
+      });
+      if (upResult.code !== 0) {
+        throw error;
+      }
+      await waitHealthy(params);
+    }
+
     return {
       app_id: params.appId,
       status: "started",
       detail: "app started with lifecycle manager",
       ports: { http: params.httpPort, mcp: params.mcpPort }
     };
-  }
-
-  const composePath = composeFilePath(params.appDir);
-  if (!composePath) {
-    throw new Error(`App '${params.appId}' has no docker-compose.yml; cannot launch`);
-  }
-
-  patchComposePorts(composePath, {
-    containerHttpPort: 8080,
-    hostHttpPort: params.httpPort,
-    containerMcpPort: params.resolvedApp.mcp.port,
-    hostMcpPort: params.mcpPort
   });
-  const composeEnv = buildShellLifecycleEnv(params);
-
-  const hasImages = await composeImagesExist(composeCmd, params.appDir, spawnImpl, composeEnv);
-  const upArgs = hasImages ? [...composeCmd.slice(1), "up", "-d"] : [...composeCmd.slice(1), "up", "--build", "-d"];
-  let upResult = await runSpawn(spawnImpl, composeCmd[0]!, upArgs, {
-    cwd: params.appDir,
-    env: composeEnv,
-    captureStderr: true
-  });
-  if (upResult.code !== 0) {
-    throw new Error(`App '${params.appId}' docker compose up failed (rc=${upResult.code}): ${upResult.stderr.slice(0, 500)}`);
-  }
-
-  try {
-    await waitHealthy(params);
-  } catch (error) {
-    upResult = await runSpawn(spawnImpl, composeCmd[0]!, [...composeCmd.slice(1), "up", "--build", "-d"], {
-      cwd: params.appDir,
-      env: composeEnv,
-      captureStderr: true
-    });
-    if (upResult.code !== 0) {
-      throw error;
-    }
-    await waitHealthy(params);
-  }
-
-  return {
-    app_id: params.appId,
-    status: "started",
-    detail: "app started with lifecycle manager",
-    ports: { http: params.httpPort, mcp: params.mcpPort }
-  };
 }
 
 export async function startShellLifecycleAppTarget(params: {
@@ -489,41 +529,43 @@ export async function startShellLifecycleAppTarget(params: {
   spawnImpl?: SpawnLike;
   fetchImpl?: typeof fetch;
 }): Promise<AppLifecycleActionResult> {
-  const spawnImpl = params.spawnImpl ?? spawn;
-  const lifecycleStart = params.resolvedApp.lifecycle.start.trim();
-  if (!lifecycleStart) {
-    throw new Error(`App '${params.appId}' does not define lifecycle.start`);
-  }
+  return await withAppStartOperation(params, async () => {
+    const spawnImpl = params.spawnImpl ?? spawn;
+    const lifecycleStart = params.resolvedApp.lifecycle.start.trim();
+    if (!lifecycleStart) {
+      throw new Error(`App '${params.appId}' does not define lifecycle.start`);
+    }
 
-  if (await isAppHealthy(params)) {
+    if (await isAppHealthy(params)) {
+      return {
+        app_id: params.appId,
+        status: "started",
+        detail: "app started with lifecycle manager",
+        ports: { http: params.httpPort, mcp: params.mcpPort }
+      };
+    }
+
+    if (!params.skipSetup) {
+      await runLifecycleSetup(params);
+    }
+
+    const child = spawnImpl(lifecycleStart, [], {
+      cwd: params.appDir,
+      env: buildShellLifecycleEnv(params),
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    shellLifecycleProcesses.set(params.appId, child);
+    shellLifecyclePorts.set(params.appId, { http: params.httpPort, mcp: params.mcpPort });
+
+    await waitHealthy(params);
     return {
       app_id: params.appId,
       status: "started",
       detail: "app started with lifecycle manager",
       ports: { http: params.httpPort, mcp: params.mcpPort }
     };
-  }
-
-  if (!params.skipSetup) {
-    await runLifecycleSetup(params);
-  }
-
-  const child = spawnImpl(lifecycleStart, [], {
-    cwd: params.appDir,
-    env: buildShellLifecycleEnv(params),
-    shell: true,
-    stdio: ["ignore", "pipe", "pipe"]
   });
-  shellLifecycleProcesses.set(params.appId, child);
-  shellLifecyclePorts.set(params.appId, { http: params.httpPort, mcp: params.mcpPort });
-
-  await waitHealthy(params);
-  return {
-    app_id: params.appId,
-    status: "started",
-    detail: "app started with lifecycle manager",
-    ports: { http: params.httpPort, mcp: params.mcpPort }
-  };
 }
 
 export async function startSubprocessAppTarget(params: {
@@ -537,41 +579,43 @@ export async function startSubprocessAppTarget(params: {
   spawnImpl?: SpawnLike;
   fetchImpl?: typeof fetch;
 }): Promise<AppLifecycleActionResult> {
-  const spawnImpl = params.spawnImpl ?? spawn;
-  const startCommand = params.resolvedApp.startCommand.trim();
-  if (!startCommand) {
-    throw new Error(`App '${params.appId}' does not define startCommand`);
-  }
+  return await withAppStartOperation(params, async () => {
+    const spawnImpl = params.spawnImpl ?? spawn;
+    const startCommand = params.resolvedApp.startCommand.trim();
+    if (!startCommand) {
+      throw new Error(`App '${params.appId}' does not define startCommand`);
+    }
 
-  if (await isAppHealthy(params)) {
+    if (await isAppHealthy(params)) {
+      return {
+        app_id: params.appId,
+        status: "started",
+        detail: "app started with lifecycle manager",
+        ports: { http: params.httpPort, mcp: params.mcpPort }
+      };
+    }
+
+    if (!params.skipSetup) {
+      await runLifecycleSetup(params);
+    }
+
+    const child = spawnImpl(startCommand, [], {
+      cwd: params.appDir,
+      env: buildShellLifecycleEnv(params),
+      shell: true,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    shellLifecycleProcesses.set(params.appId, child);
+    shellLifecyclePorts.set(params.appId, { http: params.httpPort, mcp: params.mcpPort });
+
+    await waitHealthy(params);
     return {
       app_id: params.appId,
       status: "started",
       detail: "app started with lifecycle manager",
       ports: { http: params.httpPort, mcp: params.mcpPort }
     };
-  }
-
-  if (!params.skipSetup) {
-    await runLifecycleSetup(params);
-  }
-
-  const child = spawnImpl(startCommand, [], {
-    cwd: params.appDir,
-    env: buildShellLifecycleEnv(params),
-    shell: true,
-    stdio: ["ignore", "pipe", "pipe"]
   });
-  shellLifecycleProcesses.set(params.appId, child);
-  shellLifecyclePorts.set(params.appId, { http: params.httpPort, mcp: params.mcpPort });
-
-  await waitHealthy(params);
-  return {
-    app_id: params.appId,
-    status: "started",
-    detail: "app started with lifecycle manager",
-    ports: { http: params.httpPort, mcp: params.mcpPort }
-  };
 }
 
 export async function stopShellLifecycleAppTarget(params: {

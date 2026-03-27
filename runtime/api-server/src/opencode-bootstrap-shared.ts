@@ -162,6 +162,31 @@ function normalizeOpencodeBootstrapApplication(params: {
   };
 }
 
+async function waitForInFlightAppBuild(params: {
+  store: RuntimeStateStore;
+  workspaceId: string;
+  appId: string;
+  timeoutMs?: number;
+}): Promise<string | undefined> {
+  const timeoutMs = params.timeoutMs ?? 305_000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const build = params.store.getAppBuild({
+      workspaceId: params.workspaceId,
+      appId: params.appId
+    });
+    const status = build?.status;
+    if (status !== "building") {
+      return status;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new AppLifecycleExecutorError(
+    504,
+    `timed out waiting for app '${params.appId}' setup already in progress`
+  );
+}
+
 export async function bootstrapResolvedApplications(params: {
   workspaceDir: string;
   holabossUserId?: string;
@@ -205,13 +230,32 @@ export async function bootstrapResolvedApplications(params: {
   }));
   const applications: OpencodeBootstrapApplication[] = [];
   for (const preparedStart of preparedStarts) {
-    const build =
+    let build =
       params.store && params.workspaceId
         ? params.store.getAppBuild({
           workspaceId: params.workspaceId,
           appId: preparedStart.resolvedApp.appId
         })
         : null;
+    if (build?.status === "building" && params.store && params.workspaceId) {
+      const settledStatus = await waitForInFlightAppBuild({
+        store: params.store,
+        workspaceId: params.workspaceId,
+        appId: preparedStart.resolvedApp.appId
+      });
+      build = settledStatus
+        ? params.store.getAppBuild({
+          workspaceId: params.workspaceId,
+          appId: preparedStart.resolvedApp.appId
+        })
+        : null;
+    }
+    if (build?.status === "failed") {
+      throw new AppLifecycleExecutorError(
+        500,
+        `App '${preparedStart.resolvedApp.appId}' setup failed${build.error ? `: ${build.error}` : ""}`
+      );
+    }
     const started = await params.appLifecycleExecutor.startApp({
       appId: preparedStart.resolvedApp.appId,
       appDir: preparedStart.appDir,

@@ -389,6 +389,66 @@ test("startShellLifecycleAppTarget runs lifecycle.setup before lifecycle.start",
   ]);
 });
 
+test("startShellLifecycleAppTarget coalesces concurrent starts for the same app", async () => {
+  const appDir = fs.mkdtempSync(path.join(os.tmpdir(), "hb-shell-app-concurrent-"));
+  const calls: Array<{ key: string; cwd?: string }> = [];
+  let started = false;
+  let spawnCount = 0;
+  const spawnStub = ((command: string, args?: readonly string[], options?: { cwd?: string }) => {
+    const key = `${command} ${(args ?? []).join(" ")}`.trim();
+    calls.push({ key, cwd: options?.cwd });
+    spawnCount += 1;
+    const child = new EventEmitter() as EventEmitter & {
+      stderr: EventEmitter & { setEncoding: (encoding: string) => void };
+      stdout: EventEmitter & { setEncoding: (encoding: string) => void };
+      kill: () => void;
+      exitCode?: number | null;
+    };
+    child.stderr = Object.assign(new EventEmitter(), { setEncoding: (_encoding: string) => {} });
+    child.stdout = Object.assign(new EventEmitter(), { setEncoding: (_encoding: string) => {} });
+    child.kill = () => {};
+    setTimeout(() => {
+      started = true;
+      child.exitCode = 0;
+      child.emit("close", 0);
+    }, 20);
+    return child;
+  }) as typeof import("node:child_process").spawn;
+  const fetchStub = (async () => {
+    if (!started) {
+      throw new Error("app not started yet");
+    }
+    return new Response("", { status: 200 });
+  }) as typeof fetch;
+
+  const params = {
+    appId: "app-a",
+    appDir,
+    resolvedApp: {
+      appId: "app-a",
+      mcp: { transport: "http-sse", port: 4100, path: "/mcp" },
+      healthCheck: { path: "/health", timeoutS: 1, intervalS: 0.01 },
+      envContract: [],
+      startCommand: "",
+      baseDir: "apps/app-a",
+      lifecycle: { setup: "", start: "npm run start", stop: "npm run stop" }
+    },
+    httpPort: 18081,
+    mcpPort: 13101,
+    spawnImpl: spawnStub,
+    fetchImpl: fetchStub
+  } as const;
+
+  const [first, second] = await Promise.all([
+    startShellLifecycleAppTarget(params),
+    startShellLifecycleAppTarget(params)
+  ]);
+
+  assert.deepEqual(first, second);
+  assert.equal(spawnCount, 1);
+  assert.deepEqual(calls, [{ key: "npm run start", cwd: appDir }]);
+});
+
 test("startShellLifecycleAppTarget skips lifecycle.setup when skipSetup is true", async () => {
   const appDir = fs.mkdtempSync(path.join(os.tmpdir(), "hb-shell-app-skip-setup-"));
   const calls: Array<{ key: string; cwd?: string; shell?: boolean }> = [];

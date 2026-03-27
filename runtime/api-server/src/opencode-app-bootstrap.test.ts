@@ -171,6 +171,142 @@ test("bootstrapResolvedApplications starts resolved apps without a runtime API h
   store.close();
 });
 
+test("bootstrapResolvedApplications waits for an in-flight app setup before starting", async () => {
+  const root = makeTempDir("hb-opencode-bootstrap-wait-");
+  const store = createStore(root);
+  store.createWorkspace({
+    workspaceId: "workspace-1",
+    name: "Workspace 1",
+    harness: "opencode"
+  });
+  const workspaceDir = path.join(root, "workspace", "workspace-1");
+  fs.mkdirSync(path.join(workspaceDir, "apps", "app-a"), { recursive: true });
+  store.upsertAppBuild({
+    workspaceId: "workspace-1",
+    appId: "app-a",
+    status: "building"
+  });
+  const calls: Array<Record<string, unknown>> = [];
+  const appLifecycleExecutor: AppLifecycleExecutorLike = {
+    async startApp(params) {
+      calls.push(params as unknown as Record<string, unknown>);
+      return {
+        app_id: params.appId,
+        status: "running",
+        detail: "ok",
+        ports: { http: params.httpPort ?? 18080, mcp: params.mcpPort ?? 13100 }
+      };
+    },
+    async stopApp() {
+      throw new Error("not implemented");
+    },
+    async shutdownAll() {
+      throw new Error("not implemented");
+    }
+  };
+
+  setTimeout(() => {
+    store.upsertAppBuild({
+      workspaceId: "workspace-1",
+      appId: "app-a",
+      status: "completed"
+    });
+  }, 20);
+
+  const result = await bootstrapResolvedApplications({
+    workspaceDir,
+    holabossUserId: "user-1",
+    store,
+    workspaceId: "workspace-1",
+    resolvedApplications: [
+      {
+        app_id: "app-a",
+        mcp: { transport: "http-sse", port: 3099, path: "/mcp" },
+        health_check: { path: "/health", timeout_s: 60, interval_s: 5 },
+        env_contract: ["HOLABOSS_USER_ID"],
+        start_command: "npm run start",
+        base_dir: "apps/app-a",
+        lifecycle: { setup: "", start: "", stop: "" }
+      }
+    ],
+    appLifecycleExecutor
+  });
+
+  assert.deepEqual(result, {
+    applications: [
+      {
+        app_id: "app-a",
+        mcp_url: "http://localhost:13100/mcp",
+        timeout_ms: 60000,
+        ports: { http: 18080, mcp: 13100 }
+      }
+    ]
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.skipSetup, true);
+  store.close();
+});
+
+test("bootstrapResolvedApplications surfaces a failed in-flight app setup", async () => {
+  const root = makeTempDir("hb-opencode-bootstrap-failed-");
+  const store = createStore(root);
+  store.createWorkspace({
+    workspaceId: "workspace-1",
+    name: "Workspace 1",
+    harness: "opencode"
+  });
+  const workspaceDir = path.join(root, "workspace", "workspace-1");
+  fs.mkdirSync(path.join(workspaceDir, "apps", "app-a"), { recursive: true });
+  store.upsertAppBuild({
+    workspaceId: "workspace-1",
+    appId: "app-a",
+    status: "building"
+  });
+  const appLifecycleExecutor: AppLifecycleExecutorLike = {
+    async startApp() {
+      throw new Error("startApp should not be called when setup fails");
+    },
+    async stopApp() {
+      throw new Error("not implemented");
+    },
+    async shutdownAll() {
+      throw new Error("not implemented");
+    }
+  };
+
+  setTimeout(() => {
+    store.upsertAppBuild({
+      workspaceId: "workspace-1",
+      appId: "app-a",
+      status: "failed",
+      error: "simulated failure"
+    });
+  }, 20);
+
+  await assert.rejects(
+    bootstrapResolvedApplications({
+      workspaceDir,
+      holabossUserId: "user-1",
+      store,
+      workspaceId: "workspace-1",
+      resolvedApplications: [
+        {
+          app_id: "app-a",
+          mcp: { transport: "http-sse", port: 3099, path: "/mcp" },
+          health_check: { path: "/health", timeout_s: 60, interval_s: 5 },
+          env_contract: ["HOLABOSS_USER_ID"],
+          start_command: "npm run start",
+          base_dir: "apps/app-a",
+          lifecycle: { setup: "", start: "", stop: "" }
+        }
+      ],
+      appLifecycleExecutor
+    }),
+    /App 'app-a' setup failed: simulated failure/
+  );
+  store.close();
+});
+
 test("runOpencodeAppBootstrapCli writes JSON response for a valid request", async () => {
   const root = makeTempDir("hb-opencode-bootstrap-cli-");
   const store = createStore(root);
