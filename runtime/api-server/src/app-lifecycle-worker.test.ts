@@ -421,7 +421,7 @@ test("startShellLifecycleAppTarget coalesces concurrent starts for the same app"
     return new Response("", { status: 200 });
   }) as typeof fetch;
 
-  const params = {
+  const params: Parameters<typeof startShellLifecycleAppTarget>[0] = {
     appId: "app-a",
     appDir,
     resolvedApp: {
@@ -437,7 +437,7 @@ test("startShellLifecycleAppTarget coalesces concurrent starts for the same app"
     mcpPort: 13101,
     spawnImpl: spawnStub,
     fetchImpl: fetchStub
-  } as const;
+  };
 
   const [first, second] = await Promise.all([
     startShellLifecycleAppTarget(params),
