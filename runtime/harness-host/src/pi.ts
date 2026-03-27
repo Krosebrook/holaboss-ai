@@ -887,6 +887,7 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   const skillDirs = resolvePiSkillDirs(request);
   const browserExtensionFactory = await resolvePiDesktopBrowserExtensionFactory({
     runtimeApiBaseUrl: request.runtime_api_base_url,
+    workspaceId: request.workspace_id,
   });
   const resourceLoader = new DefaultResourceLoader({
     cwd: request.workspace_dir,

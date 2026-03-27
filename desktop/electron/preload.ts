@@ -161,6 +161,7 @@ interface AppUpdateStatusPayload {
 }
 
 interface WorkbenchOpenBrowserPayload {
+  workspaceId?: string | null;
   url?: string | null;
 }
 
@@ -600,6 +601,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }
   },
   browser: {
+    setActiveWorkspace: (workspaceId?: string | null) =>
+      ipcRenderer.invoke("browser:setActiveWorkspace", workspaceId) as Promise<BrowserTabListPayload>,
     getState: () => ipcRenderer.invoke("browser:getState") as Promise<BrowserTabListPayload>,
     setBounds: (bounds: BrowserBoundsPayload) => ipcRenderer.invoke("browser:setBounds", bounds) as Promise<BrowserTabListPayload>,
     navigate: (targetUrl: string) => ipcRenderer.invoke("browser:navigate", targetUrl) as Promise<BrowserTabListPayload>,

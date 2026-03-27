@@ -619,124 +619,53 @@ function EmptyWorkspacePane() {
 function WorkspaceBootstrapPane() {
   return (
     <section className="theme-shell soft-vignette neon-border relative flex h-full min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-[var(--theme-radius-card)] shadow-card">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_14%,rgba(247,90,84,0.1),transparent_26%),radial-gradient(circle_at_86%_16%,rgba(233,117,109,0.08),transparent_22%),radial-gradient(circle_at_50%_110%,rgba(247,170,126,0.08),transparent_28%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(247,90,84,0.12),transparent_34%),radial-gradient(circle_at_bottom,rgba(87,255,173,0.08),transparent_36%)]" />
 
-      <div className="relative grid w-full max-w-[1120px] gap-6 px-5 py-5 lg:grid-cols-[minmax(0,1.15fr)_340px] lg:px-8 lg:py-8">
-        <div className="theme-subtle-surface relative overflow-hidden rounded-[30px] border border-panel-border/45 p-4 sm:p-5">
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.03),transparent_42%,rgba(247,90,84,0.05)_100%)]" />
+      <div className="relative w-full max-w-[640px] px-6 py-8">
+        <div className="theme-subtle-surface rounded-[30px] border border-panel-border/45 p-6 shadow-card sm:p-8">
+          <div className="inline-flex items-center gap-2 rounded-full border border-panel-border/35 bg-black/10 px-3 py-1.5 text-[10px] uppercase tracking-[0.22em] text-text-dim/74">
+            <Sparkles size={12} className="text-neon-green/82" />
+            <span>Desktop startup</span>
+          </div>
 
-          <div className="relative flex items-center justify-between gap-3 rounded-[22px] border border-panel-border/35 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <div className="h-10 w-40 rounded-[16px] border border-panel-border/35 bg-black/10" />
+          <div className="mt-6 flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-[28px] font-semibold tracking-[-0.04em] text-text-main">Preparing the desktop shell</div>
+              <div className="mt-3 max-w-[520px] text-[14px] leading-7 text-text-muted/84">
+                Syncing workspace state and bringing the browser, files, and agent surfaces online.
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="h-10 w-24 rounded-[16px] border border-panel-border/35 bg-black/10" />
-              <div className="h-10 w-10 rounded-[16px] border border-panel-border/35 bg-black/10" />
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-[18px] border border-neon-green/35 bg-neon-green/10 text-neon-green">
+              <Loader2 size={18} className="animate-spin" />
             </div>
           </div>
 
-          <div className="relative mt-5 grid min-h-[420px] gap-4 lg:grid-cols-[96px_minmax(0,1fr)_280px]">
-            <div className="theme-shell flex flex-col items-center gap-4 rounded-[24px] border border-panel-border/35 px-3 py-4">
-              <div className="h-11 w-11 rounded-[16px] border border-neon-green/30 bg-neon-green/12" />
-              <div className="h-11 w-11 rounded-[16px] border border-panel-border/35 bg-black/10" />
-              <div className="h-11 w-11 rounded-[16px] border border-panel-border/35 bg-black/10" />
-              <div className="mt-auto h-24 w-full rounded-[18px] border border-panel-border/30 bg-black/10" />
-            </div>
-
-            <div className="grid gap-4">
-              <div className="theme-shell rounded-[24px] border border-panel-border/35 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.2em] text-neon-green/74">Workspace</div>
-                    <div className="mt-2 text-[28px] font-semibold tracking-[-0.04em] text-text-main">Loading your workspace</div>
-                  </div>
-                  <div className="grid h-12 w-12 place-items-center rounded-[18px] border border-neon-green/35 bg-neon-green/10 text-neon-green">
-                    <Loader2 size={18} className="animate-spin" />
-                  </div>
-                </div>
-                <div className="mt-3 max-w-[560px] text-[14px] leading-7 text-text-muted/84">
-                  Restoring workspace state, session history, and desktop surfaces so the shell opens in a ready-to-work state.
-                </div>
-                <div className="mt-5 overflow-hidden rounded-full border border-panel-border/35 bg-black/10 p-1">
-                  <div className="h-2 rounded-full bg-[linear-gradient(90deg,rgba(247,90,84,0.62),rgba(233,117,109,0.82),rgba(247,170,126,0.72))] animate-pulse" />
-                </div>
-                <div className="mt-4 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-dim/74">
-                  <span className="rounded-full border border-panel-border/35 bg-black/10 px-2.5 py-1">Hydrating workspace</span>
-                  <span className="rounded-full border border-panel-border/35 bg-black/10 px-2.5 py-1">Restoring agent state</span>
-                  <span className="rounded-full border border-panel-border/35 bg-black/10 px-2.5 py-1">Attaching desktop surfaces</span>
-                </div>
-              </div>
-
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-                <div className="theme-shell rounded-[24px] border border-panel-border/35 p-4">
-                  <div className="h-4 w-28 rounded-full bg-black/10" />
-                  <div className="mt-4 space-y-3">
-                    <div className="h-14 rounded-[18px] border border-panel-border/30 bg-black/10" />
-                    <div className="h-24 rounded-[22px] border border-panel-border/30 bg-black/10" />
-                    <div className="h-11 rounded-[16px] border border-panel-border/30 bg-black/10" />
-                  </div>
-                </div>
-
-                <div className="theme-shell rounded-[24px] border border-panel-border/35 p-4">
-                  <div className="h-4 w-24 rounded-full bg-black/10" />
-                  <div className="mt-4 space-y-3">
-                    <div className="h-16 rounded-[18px] border border-panel-border/30 bg-black/10" />
-                    <div className="h-16 rounded-[18px] border border-panel-border/30 bg-black/10" />
-                    <div className="h-16 rounded-[18px] border border-panel-border/30 bg-black/10" />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="theme-shell hidden rounded-[24px] border border-panel-border/35 p-4 lg:block">
-              <div className="h-4 w-28 rounded-full bg-black/10" />
-              <div className="mt-4 space-y-3">
-                <div className="h-20 rounded-[18px] border border-panel-border/30 bg-black/10" />
-                <div className="h-20 rounded-[18px] border border-panel-border/30 bg-black/10" />
-                <div className="h-20 rounded-[18px] border border-panel-border/30 bg-black/10" />
-                <div className="h-20 rounded-[18px] border border-panel-border/30 bg-black/10" />
-              </div>
-            </div>
+          <div className="mt-6 overflow-hidden rounded-full border border-panel-border/35 bg-black/10 p-1">
+            <div className="h-2 rounded-full bg-[linear-gradient(90deg,rgba(247,90,84,0.62),rgba(233,117,109,0.82),rgba(247,170,126,0.72))] animate-pulse" />
           </div>
-        </div>
 
-        <div className="theme-subtle-surface relative overflow-hidden rounded-[28px] border border-panel-border/45 p-5">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(247,90,84,0.1),transparent_34%)]" />
-          <div className="relative">
-            <div className="inline-flex items-center gap-2 rounded-full border border-panel-border/35 bg-black/10 px-3 py-1.5 text-[10px] uppercase tracking-[0.22em] text-text-dim/74">
-              <Sparkles size={12} className="text-neon-green/82" />
-              <span>Bring-up</span>
-            </div>
-            <div className="mt-4 text-[24px] font-semibold tracking-[-0.04em] text-text-main">Preparing the desktop shell</div>
-            <div className="mt-3 text-[13px] leading-7 text-text-muted/84">
-              This should only take a moment. The app is syncing your workspace list and restoring the last active desktop state.
-            </div>
-
-            <div className="mt-6 grid gap-3">
-              {[
-                "Syncing workspace records",
-                "Restoring recent session context",
-                "Initializing browser and file surfaces"
-              ].map((step, index) => (
-                <div key={step} className="flex items-center gap-3 rounded-[18px] border border-panel-border/35 bg-black/10 px-4 py-3">
-                  <div
-                    className={`grid h-8 w-8 shrink-0 place-items-center rounded-[12px] border ${
-                      index === 0
-                        ? "border-neon-green/35 bg-neon-green/12 text-neon-green"
-                        : "border-panel-border/35 bg-panel-bg/40 text-text-dim/74"
-                    }`}
-                  >
-                    {index === 0 ? <Loader2 size={14} className="animate-spin" /> : <span className="text-[11px]">{index + 1}</span>}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[12px] font-medium text-text-main">{step}</div>
-                    <div className="mt-1 text-[11px] text-text-dim/72">
-                      {index === 0 ? "In progress" : "Queued next"}
-                    </div>
-                  </div>
+          <div className="mt-6 grid gap-3">
+            {[
+              ["Loading workspace records", "Checking the latest workspace state."],
+              ["Restoring recent context", "Reconnecting the most recent session surfaces."],
+              ["Attaching desktop surfaces", "Binding browser and file panes to the shell."]
+            ].map(([title, detail], index) => (
+              <div key={title} className="flex items-center gap-3 rounded-[18px] border border-panel-border/35 bg-black/10 px-4 py-3">
+                <div
+                  className={`grid h-8 w-8 shrink-0 place-items-center rounded-[12px] border ${
+                    index === 0
+                      ? "border-neon-green/35 bg-neon-green/12 text-neon-green"
+                      : "border-panel-border/35 bg-panel-bg/40 text-text-dim/74"
+                  }`}
+                >
+                  {index === 0 ? <Loader2 size={14} className="animate-spin" /> : <span className="text-[11px]">{index + 1}</span>}
                 </div>
-              ))}
-            </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium text-text-main">{title}</div>
+                  <div className="mt-1 text-[11px] text-text-dim/72">{detail}</div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -796,7 +725,7 @@ function AppShellContent() {
   const outputRefreshTimerRef = useRef<number | null>(null);
 
   const refreshRuntimeOutputs = useCallback(async () => {
-    if (!selectedWorkspaceId) {
+    if (!selectedWorkspaceId || runtimeStatus?.status !== "running") {
       setRuntimeOutputEntries([]);
       return;
     }
@@ -807,16 +736,16 @@ function AppShellContent() {
     } catch {
       setRuntimeOutputEntries([]);
     }
-  }, [installedApps, selectedWorkspaceId]);
+  }, [installedApps, runtimeStatus?.status, selectedWorkspaceId]);
 
   useEffect(() => {
-    if (!selectedWorkspaceId) {
+    if (!selectedWorkspaceId || runtimeStatus?.status !== "running") {
       setRuntimeOutputEntries([]);
       return;
     }
 
     void refreshRuntimeOutputs();
-  }, [refreshRuntimeOutputs, selectedWorkspaceId]);
+  }, [refreshRuntimeOutputs, runtimeStatus?.status, selectedWorkspaceId]);
 
   useEffect(() => {
     const unsubscribe = window.electronAPI.workspace.onSessionStreamEvent((payload) => {
@@ -895,7 +824,10 @@ function AppShellContent() {
       return;
     }
 
-    const unsubscribe = window.electronAPI.workbench.onOpenBrowser(() => {
+    const unsubscribe = window.electronAPI.workbench.onOpenBrowser((payload) => {
+      if (payload.workspaceId && payload.workspaceId !== selectedWorkspaceId) {
+        return;
+      }
       setActiveLeftRailItem("agent");
       setAgentView({ type: "chat" });
       setWorkbenchOpen(true);
@@ -903,7 +835,7 @@ function AppShellContent() {
     });
 
     return unsubscribe;
-  }, []);
+  }, [selectedWorkspaceId]);
 
   useEffect(() => {
     if (!window.electronAPI) {

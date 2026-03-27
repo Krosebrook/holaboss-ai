@@ -13,11 +13,12 @@ import {
   session,
   shell,
   type IpcMainInvokeEvent,
-  type OpenDialogOptions
+  type OpenDialogOptions,
+  type Session
 } from "electron";
 import Database from "better-sqlite3";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import { createServer, request as httpRequest, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
@@ -117,6 +118,33 @@ interface BrowserTabListPayload {
 interface BrowserTabRecord {
   view: BrowserView;
   state: BrowserStatePayload;
+}
+
+interface BrowserWorkspaceTabPersistencePayload {
+  id: string;
+  url: string;
+  title: string;
+  faviconUrl?: string;
+}
+
+interface BrowserWorkspacePersistencePayload {
+  activeTabId: string;
+  tabs: BrowserWorkspaceTabPersistencePayload[];
+  bookmarks: BrowserBookmarkPayload[];
+  downloads: BrowserDownloadPayload[];
+  history: BrowserHistoryEntryPayload[];
+}
+
+interface BrowserWorkspaceState {
+  workspaceId: string;
+  partition: string;
+  session: Session;
+  tabs: Map<string, BrowserTabRecord>;
+  activeTabId: string;
+  bookmarks: BrowserBookmarkPayload[];
+  downloads: BrowserDownloadPayload[];
+  history: BrowserHistoryEntryPayload[];
+  downloadTrackingRegistered: boolean;
 }
 
 interface BrowserBookmarkPayload {
@@ -259,6 +287,7 @@ interface GithubReleasePayload {
 }
 
 interface WorkbenchOpenBrowserPayload {
+  workspaceId?: string | null;
   url?: string | null;
 }
 
@@ -277,11 +306,9 @@ let addressSuggestionsState: { suggestions: AddressSuggestionPayload[]; selected
   suggestions: [],
   selectedIndex: -1
 };
-let activeBrowserTabId = "";
-const browserTabs = new Map<string, BrowserTabRecord>();
-let browserBookmarks: BrowserBookmarkPayload[] = [];
-let browserDownloads: BrowserDownloadPayload[] = [];
-let browserHistory: BrowserHistoryEntryPayload[] = [];
+let activeBrowserWorkspaceId = "";
+const browserWorkspaces = new Map<string, BrowserWorkspaceState>();
+const browserDownloadTrackingPartitions = new Set<string>();
 let fileBookmarks: FileBookmarkPayload[] = [];
 let runtimeProcess: ChildProcessWithoutNullStreams | null = null;
 let pendingAuthUser: AuthUserPayload | null = null;
@@ -1551,16 +1578,22 @@ function appendSessionStreamDebug(streamId: string, phase: string, detail: strin
   }
 }
 
-function browserBookmarksPath() {
-  return path.join(app.getPath("userData"), "browser-bookmarks.json");
+function sanitizeBrowserWorkspaceSegment(workspaceId: string) {
+  const normalized = workspaceId.trim().replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "workspace";
+  const digest = createHash("sha256").update(workspaceId.trim(), "utf8").digest("hex").slice(0, 12);
+  return `${normalized}-${digest}`;
 }
 
-function browserDownloadsPath() {
-  return path.join(app.getPath("userData"), "browser-downloads.json");
+function browserWorkspaceStorageDir(workspaceId: string) {
+  return path.join(app.getPath("userData"), "browser-workspaces", sanitizeBrowserWorkspaceSegment(workspaceId));
 }
 
-function browserHistoryPath() {
-  return path.join(app.getPath("userData"), "browser-history.json");
+function browserWorkspaceStatePath(workspaceId: string) {
+  return path.join(browserWorkspaceStorageDir(workspaceId), "browser-state.json");
+}
+
+function browserWorkspacePartition(workspaceId: string) {
+  return `persist:holaboss-browser-${sanitizeBrowserWorkspaceSegment(workspaceId)}`;
 }
 
 function fileBookmarksPath() {
@@ -2050,9 +2083,6 @@ async function writeJsonFile(filePath: string, payload: unknown) {
 }
 
 async function loadBrowserPersistence() {
-  browserBookmarks = await readJsonFile<BrowserBookmarkPayload[]>(browserBookmarksPath(), []);
-  browserDownloads = await readJsonFile<BrowserDownloadPayload[]>(browserDownloadsPath(), []);
-  browserHistory = await readJsonFile<BrowserHistoryEntryPayload[]>(browserHistoryPath(), []);
   fileBookmarks = await readJsonFile<FileBookmarkPayload[]>(fileBookmarksPath(), []);
 }
 
@@ -2163,6 +2193,14 @@ function desktopBrowserServiceTokenFromRequest(request: IncomingMessage): string
   return typeof raw === "string" ? raw.trim() : "";
 }
 
+function desktopBrowserWorkspaceIdFromRequest(request: IncomingMessage): string {
+  const raw = request.headers["x-holaboss-workspace-id"];
+  if (Array.isArray(raw)) {
+    return (raw[0] || "").trim();
+  }
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
 function writeBrowserServiceJson(
   response: ServerResponse<IncomingMessage>,
   statusCode: number,
@@ -2223,9 +2261,9 @@ function serializeBrowserEvalResult(value: unknown): unknown {
   }
 }
 
-async function navigateActiveBrowserTab(targetUrl: string): Promise<BrowserTabListPayload> {
-  ensureBrowserTabs();
-  const activeTab = getActiveBrowserTab();
+async function navigateActiveBrowserTab(workspaceId: string, targetUrl: string): Promise<BrowserTabListPayload> {
+  await ensureBrowserWorkspace(workspaceId);
+  const activeTab = getActiveBrowserTab(workspaceId);
   if (!activeTab) {
     throw new Error("No active browser tab is available.");
   }
@@ -2239,11 +2277,11 @@ async function navigateActiveBrowserTab(targetUrl: string): Promise<BrowserTabLi
       loading: false,
       error: error instanceof Error ? error.message : "Failed to load URL."
     };
-    emitBrowserState();
+    emitBrowserState(workspaceId);
     throw error;
   }
 
-  return getBrowserTabsSnapshot();
+  return browserWorkspaceSnapshot(workspaceId);
 }
 
 async function handleDesktopBrowserServiceRequest(
@@ -2254,6 +2292,8 @@ async function handleDesktopBrowserServiceRequest(
     const requestUrl = new URL(request.url || "/", "http://127.0.0.1");
     const pathname = requestUrl.pathname;
     const method = (request.method || "GET").toUpperCase();
+    const requestedWorkspaceId = desktopBrowserWorkspaceIdFromRequest(request);
+    const targetWorkspaceId = requestedWorkspaceId || activeBrowserWorkspaceId;
 
     if (!desktopBrowserServiceAuthToken || desktopBrowserServiceTokenFromRequest(request) !== desktopBrowserServiceAuthToken) {
       writeBrowserServiceJson(response, 401, { error: "Unauthorized." });
@@ -2265,20 +2305,25 @@ async function handleDesktopBrowserServiceRequest(
       return;
     }
 
+    if (!targetWorkspaceId) {
+      writeBrowserServiceJson(response, 409, { error: "No active browser workspace is available." });
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/v1/browser/tabs") {
-      ensureBrowserTabs();
-      writeBrowserServiceJson(response, 200, getBrowserTabsSnapshot());
+      await ensureBrowserWorkspace(targetWorkspaceId);
+      writeBrowserServiceJson(response, 200, browserWorkspaceSnapshot(targetWorkspaceId));
       return;
     }
 
     if (method === "GET" && pathname === "/api/v1/browser/page") {
-      ensureBrowserTabs();
-      const activeTab = getActiveBrowserTab();
+      await ensureBrowserWorkspace(targetWorkspaceId);
+      const activeTab = getActiveBrowserTab(targetWorkspaceId);
       if (!activeTab) {
         writeBrowserServiceJson(response, 409, { error: "No active browser tab is available." });
         return;
       }
-      syncBrowserState(activeTab.state.id);
+      syncBrowserState(targetWorkspaceId, activeTab.state.id);
       writeBrowserServiceJson(response, 200, browserPagePayload(activeTab));
       return;
     }
@@ -2290,8 +2335,10 @@ async function handleDesktopBrowserServiceRequest(
         writeBrowserServiceJson(response, 400, { error: "Field 'url' is required." });
         return;
       }
-      emitWorkbenchOpenBrowser({ url: targetUrl });
-      const snapshot = await navigateActiveBrowserTab(targetUrl);
+      if (targetWorkspaceId && targetWorkspaceId === activeBrowserWorkspaceId) {
+        emitWorkbenchOpenBrowser({ workspaceId: targetWorkspaceId, url: targetUrl });
+      }
+      const snapshot = await navigateActiveBrowserTab(targetWorkspaceId, targetUrl);
       writeBrowserServiceJson(response, 200, snapshot);
       return;
     }
@@ -2304,8 +2351,8 @@ async function handleDesktopBrowserServiceRequest(
         return;
       }
 
-      ensureBrowserTabs();
-      const activeTab = getActiveBrowserTab();
+      await ensureBrowserWorkspace(targetWorkspaceId);
+      const activeTab = getActiveBrowserTab(targetWorkspaceId);
       if (!activeTab) {
         writeBrowserServiceJson(response, 409, { error: "No active browser tab is available." });
         return;
@@ -2321,8 +2368,8 @@ async function handleDesktopBrowserServiceRequest(
 
     if (method === "POST" && pathname === "/api/v1/browser/screenshot") {
       const payload = await readBrowserServiceJsonBody(request);
-      ensureBrowserTabs();
-      const activeTab = getActiveBrowserTab();
+      await ensureBrowserWorkspace(targetWorkspaceId);
+      const activeTab = getActiveBrowserTab(targetWorkspaceId);
       if (!activeTab) {
         writeBrowserServiceJson(response, 409, { error: "No active browser tab is available." });
         return;
@@ -3174,6 +3221,16 @@ async function controlPlaneHeaders(
 
 function proactiveBaseUrl() {
   return DEFAULT_PROACTIVE_URL.replace(/\/+$/, "");
+}
+
+function embeddedRuntimeStartupConfigError() {
+  if (proactiveBaseUrl()) {
+    return "";
+  }
+  return (
+    "Embedded runtime remote bridge is enabled but no remote base URL is configured. " +
+    "Set HOLABOSS_BACKEND_BASE_URL or HOLABOSS_PROACTIVE_URL in desktop/.env."
+  );
 }
 
 function controlPlaneServiceBaseUrl(service: "projects" | "marketplace" | "proactive") {
@@ -5037,6 +5094,30 @@ async function startEmbeddedRuntime() {
     return runtimeStatus;
   }
 
+  const startupConfigError = embeddedRuntimeStartupConfigError();
+  if (startupConfigError) {
+    runtimeStatus = withDesktopBrowserStatus({
+      ...runtimeStatus,
+      status: "error",
+      pid: null,
+      lastError: startupConfigError
+    });
+    persistRuntimeProcessState({
+      pid: null,
+      status: "error",
+      lastError: startupConfigError
+    });
+    appendRuntimeEventLog({
+      category: "runtime",
+      event: "embedded_runtime.config_error",
+      outcome: "error",
+      detail: startupConfigError
+    });
+    void appendRuntimeLog(`[embedded-runtime] ${startupConfigError}\n`);
+    emitRuntimeState();
+    return runtimeStatus;
+  }
+
   await fs.mkdir(sandboxRoot, { recursive: true });
   await bootstrapRuntimeDatabase();
 
@@ -5149,18 +5230,6 @@ async function startEmbeddedRuntime() {
   return runtimeStatus;
 }
 
-function persistBookmarks() {
-  return writeJsonFile(browserBookmarksPath(), browserBookmarks);
-}
-
-function persistDownloads() {
-  return writeJsonFile(browserDownloadsPath(), browserDownloads);
-}
-
-function persistHistory() {
-  return writeJsonFile(browserHistoryPath(), browserHistory);
-}
-
 function persistFileBookmarks() {
   return writeJsonFile(fileBookmarksPath(), fileBookmarks);
 }
@@ -5176,6 +5245,83 @@ function createBrowserState(overrides?: Partial<BrowserStatePayload>): BrowserSt
     loading: overrides?.loading ?? false,
     initialized: overrides?.initialized ?? false,
     error: overrides?.error ?? ""
+  };
+}
+
+function emptyBrowserTabListPayload(): BrowserTabListPayload {
+  return {
+    activeTabId: "",
+    tabs: []
+  };
+}
+
+function defaultBrowserWorkspacePersistence(): BrowserWorkspacePersistencePayload {
+  return {
+    activeTabId: "",
+    tabs: [],
+    bookmarks: [],
+    downloads: [],
+    history: []
+  };
+}
+
+function browserWorkspaceFromMap(workspaceId: string): BrowserWorkspaceState | null {
+  return browserWorkspaces.get(workspaceId.trim()) ?? null;
+}
+
+function activeBrowserWorkspace(): BrowserWorkspaceState | null {
+  if (!activeBrowserWorkspaceId) {
+    return null;
+  }
+  return browserWorkspaceFromMap(activeBrowserWorkspaceId);
+}
+
+function browserWorkspaceOrEmpty(workspaceId?: string | null): BrowserWorkspaceState | null {
+  const normalizedWorkspaceId = typeof workspaceId === "string" ? workspaceId.trim() : activeBrowserWorkspaceId;
+  if (!normalizedWorkspaceId) {
+    return null;
+  }
+  return browserWorkspaceFromMap(normalizedWorkspaceId);
+}
+
+function serializedBrowserWorkspaceTabs(workspace: BrowserWorkspaceState): BrowserWorkspaceTabPersistencePayload[] {
+  return Array.from(workspace.tabs.values(), ({ state }) => ({
+    id: state.id,
+    url: state.url,
+    title: state.title,
+    faviconUrl: state.faviconUrl
+  }));
+}
+
+function serializeBrowserWorkspace(workspace: BrowserWorkspaceState): BrowserWorkspacePersistencePayload {
+  return {
+    activeTabId: workspace.activeTabId,
+    tabs: serializedBrowserWorkspaceTabs(workspace),
+    bookmarks: workspace.bookmarks,
+    downloads: workspace.downloads,
+    history: workspace.history
+  };
+}
+
+function persistBrowserWorkspace(workspaceId: string) {
+  const workspace = browserWorkspaceFromMap(workspaceId);
+  if (!workspace) {
+    return Promise.resolve();
+  }
+  return writeJsonFile(browserWorkspaceStatePath(workspace.workspaceId), serializeBrowserWorkspace(workspace));
+}
+
+function createBrowserWorkspaceState(workspaceId: string): BrowserWorkspaceState {
+  return {
+    workspaceId,
+    partition: browserWorkspacePartition(workspaceId),
+    session: session.fromPartition(browserWorkspacePartition(workspaceId)),
+    tabs: new Map<string, BrowserTabRecord>(),
+    activeTabId: "",
+    bookmarks: [],
+    downloads: [],
+    history: [],
+    downloadTrackingRegistered: false
   };
 }
 
@@ -5373,53 +5519,6 @@ async function listDirectory(targetPath?: string | null): Promise<DirectoryPaylo
     parentPath,
     entries
   };
-}
-
-function getBrowserTabsSnapshot(): BrowserTabListPayload {
-  const tabs = Array.from(browserTabs.values(), ({ state }) => state);
-  return {
-    activeTabId: activeBrowserTabId || tabs[0]?.id || "",
-    tabs
-  };
-}
-
-function emitBrowserState() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return;
-  }
-
-  mainWindow.webContents.send("browser:state", getBrowserTabsSnapshot());
-}
-
-function emitBookmarksState() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return;
-  }
-
-  mainWindow.webContents.send("browser:bookmarks", browserBookmarks);
-}
-
-function emitDownloadsState() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    if (!downloadsPopupWindow || downloadsPopupWindow.isDestroyed()) {
-      return;
-    }
-  }
-
-  mainWindow?.webContents.send("browser:downloads", browserDownloads);
-  downloadsPopupWindow?.webContents.send("downloads:update", browserDownloads);
-}
-
-function emitHistoryState() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    if (!historyPopupWindow || historyPopupWindow.isDestroyed()) {
-      return;
-    }
-    return;
-  }
-
-  mainWindow.webContents.send("browser:history", browserHistory);
-  historyPopupWindow?.webContents.send("history:update", browserHistory);
 }
 
 function emitFileBookmarksState() {
@@ -6036,17 +6135,21 @@ function shouldTrackHistoryUrl(rawUrl: string) {
   }
 }
 
-async function recordHistoryVisit(entry: Pick<BrowserHistoryEntryPayload, "url" | "title" | "faviconUrl">) {
+async function recordHistoryVisit(
+  workspaceId: string,
+  entry: Pick<BrowserHistoryEntryPayload, "url" | "title" | "faviconUrl">
+) {
+  const workspace = browserWorkspaceFromMap(workspaceId);
   const url = entry.url.trim();
-  if (!shouldTrackHistoryUrl(url)) {
+  if (!workspace || !shouldTrackHistoryUrl(url)) {
     return;
   }
 
   const now = new Date().toISOString();
-  const existing = browserHistory.find((item) => item.url === url);
+  const existing = workspace.history.find((item) => item.url === url);
 
   if (existing) {
-    browserHistory = browserHistory
+    workspace.history = workspace.history
       .map((item) =>
         item.id === existing.id
           ? {
@@ -6060,7 +6163,7 @@ async function recordHistoryVisit(entry: Pick<BrowserHistoryEntryPayload, "url" 
       )
       .sort((a, b) => new Date(b.lastVisitedAt).getTime() - new Date(a.lastVisitedAt).getTime());
   } else {
-    browserHistory = [
+    workspace.history = [
       {
         id: `history-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         url,
@@ -6070,50 +6173,134 @@ async function recordHistoryVisit(entry: Pick<BrowserHistoryEntryPayload, "url" 
         createdAt: now,
         lastVisitedAt: now
       },
-      ...browserHistory
+      ...workspace.history
     ]
       .sort((a, b) => new Date(b.lastVisitedAt).getTime() - new Date(a.lastVisitedAt).getTime())
       .slice(0, 500);
   }
 
-  emitHistoryState();
-  await persistHistory();
+  emitHistoryState(workspaceId);
+  await persistBrowserWorkspace(workspaceId);
 }
 
-function getActiveBrowserTab(): BrowserTabRecord | null {
-  if (!activeBrowserTabId) {
+function browserWorkspaceSnapshot(workspaceId?: string | null): BrowserTabListPayload {
+  const workspace = browserWorkspaceOrEmpty(workspaceId);
+  if (!workspace) {
+    return emptyBrowserTabListPayload();
+  }
+  const tabs = Array.from(workspace.tabs.values(), ({ state }) => state);
+  return {
+    activeTabId: workspace.activeTabId || tabs[0]?.id || "",
+    tabs
+  };
+}
+
+function getActiveBrowserTab(workspaceId?: string | null): BrowserTabRecord | null {
+  const workspace = browserWorkspaceOrEmpty(workspaceId);
+  if (!workspace || !workspace.activeTabId) {
     return null;
   }
-
-  return browserTabs.get(activeBrowserTabId) ?? null;
+  return workspace.tabs.get(workspace.activeTabId) ?? null;
 }
 
-function applyBoundsToTab(tabId: string) {
-  const tab = browserTabs.get(tabId);
+function applyBoundsToTab(workspaceId: string, tabId: string) {
+  const workspace = browserWorkspaceFromMap(workspaceId);
+  const tab = workspace?.tabs.get(tabId);
   if (!tab) {
     return;
   }
-
   tab.view.setBounds(browserBounds);
+}
+
+function emitBrowserState(workspaceId?: string | null) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  const normalizedWorkspaceId = typeof workspaceId === "string" ? workspaceId.trim() : activeBrowserWorkspaceId;
+  if (normalizedWorkspaceId !== activeBrowserWorkspaceId) {
+    return;
+  }
+  mainWindow.webContents.send("browser:state", browserWorkspaceSnapshot(normalizedWorkspaceId));
+}
+
+function emitBookmarksState(workspaceId?: string | null) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  const normalizedWorkspaceId = typeof workspaceId === "string" ? workspaceId.trim() : activeBrowserWorkspaceId;
+  if (normalizedWorkspaceId !== activeBrowserWorkspaceId) {
+    return;
+  }
+  const workspace = browserWorkspaceOrEmpty(normalizedWorkspaceId);
+  mainWindow.webContents.send("browser:bookmarks", workspace?.bookmarks ?? []);
+}
+
+function emitDownloadsState(workspaceId?: string | null) {
+  const normalizedWorkspaceId = typeof workspaceId === "string" ? workspaceId.trim() : activeBrowserWorkspaceId;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (!downloadsPopupWindow || downloadsPopupWindow.isDestroyed()) {
+      return;
+    }
+  }
+  if (normalizedWorkspaceId !== activeBrowserWorkspaceId) {
+    return;
+  }
+  const workspace = browserWorkspaceOrEmpty(normalizedWorkspaceId);
+  const downloads = workspace?.downloads ?? [];
+  mainWindow?.webContents.send("browser:downloads", downloads);
+  downloadsPopupWindow?.webContents.send("downloads:update", downloads);
+}
+
+function emitHistoryState(workspaceId?: string | null) {
+  const normalizedWorkspaceId = typeof workspaceId === "string" ? workspaceId.trim() : activeBrowserWorkspaceId;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (!historyPopupWindow || historyPopupWindow.isDestroyed()) {
+      return;
+    }
+    return;
+  }
+  if (normalizedWorkspaceId !== activeBrowserWorkspaceId) {
+    return;
+  }
+  const workspace = browserWorkspaceOrEmpty(normalizedWorkspaceId);
+  const history = workspace?.history ?? [];
+  mainWindow.webContents.send("browser:history", history);
+  historyPopupWindow?.webContents.send("history:update", history);
+}
+
+function closeBrowserTabRecord(tab: BrowserTabRecord) {
+  tab.view.webContents.removeAllListeners();
+  void tab.view.webContents.close();
+}
+
+function destroyBrowserWorkspace(workspaceId: string) {
+  const workspace = browserWorkspaceFromMap(workspaceId);
+  if (!workspace) {
+    return;
+  }
+  for (const tab of workspace.tabs.values()) {
+    closeBrowserTabRecord(tab);
+  }
+  workspace.tabs.clear();
+  browserWorkspaces.delete(workspaceId);
 }
 
 function updateAttachedBrowserView() {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
   }
-
-  const activeTab = getActiveBrowserTab();
+  const activeTab = getActiveBrowserTab(activeBrowserWorkspaceId);
   if (!activeTab) {
     return;
   }
-
   mainWindow.setBrowserView(activeTab.view);
-  applyBoundsToTab(activeBrowserTabId);
+  applyBoundsToTab(activeBrowserWorkspaceId, activeTab.state.id);
 }
 
-function syncBrowserState(tabId: string) {
-  const tab = browserTabs.get(tabId);
-  if (!tab) {
+function syncBrowserState(workspaceId: string, tabId: string) {
+  const workspace = browserWorkspaceFromMap(workspaceId);
+  const tab = workspace?.tabs.get(tabId);
+  if (!workspace || !tab) {
     return;
   }
 
@@ -6126,10 +6313,11 @@ function syncBrowserState(tabId: string) {
     canGoBack: viewContents.navigationHistory.canGoBack(),
     canGoForward: viewContents.navigationHistory.canGoForward()
   };
-  emitBrowserState();
+  emitBrowserState(workspaceId);
+  void persistBrowserWorkspace(workspaceId);
 }
 
-function handleBrowserWindowOpenAsTab(targetUrl: string, disposition: string) {
+function handleBrowserWindowOpenAsTab(workspaceId: string, targetUrl: string, disposition: string) {
   const normalizedUrl = targetUrl.trim();
   if (!normalizedUrl) {
     return;
@@ -6145,39 +6333,62 @@ function handleBrowserWindowOpenAsTab(targetUrl: string, disposition: string) {
     return;
   }
 
-  const nextTabId = createBrowserTab(normalizedUrl);
+  const nextTabId = createBrowserTab(workspaceId, { url: normalizedUrl });
   if (!nextTabId) {
     return;
   }
 
-  if (disposition !== "background-tab") {
-    activeBrowserTabId = nextTabId;
-    updateAttachedBrowserView();
+  const workspace = browserWorkspaceFromMap(workspaceId);
+  if (!workspace) {
+    return;
   }
 
-  emitBrowserState();
+  if (disposition !== "background-tab") {
+    workspace.activeTabId = nextTabId;
+    if (workspaceId === activeBrowserWorkspaceId) {
+      updateAttachedBrowserView();
+    }
+  }
+
+  emitBrowserState(workspaceId);
+  void persistBrowserWorkspace(workspaceId);
 }
 
-function createBrowserTab(initialUrl?: string) {
-  if (!mainWindow) {
+function createBrowserTab(
+  workspaceId: string,
+  options: {
+    id?: string;
+    url?: string;
+    title?: string;
+    faviconUrl?: string;
+    skipInitialHistoryRecord?: boolean;
+  } = {}
+) {
+  const workspace = browserWorkspaceFromMap(workspaceId);
+  if (!mainWindow || !workspace) {
     return null;
   }
 
-  const tabId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const tabId = options.id?.trim() || `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const initialUrl = options.url?.trim() || "";
+  const hasInitialUrl = initialUrl.length > 0;
+  let suppressNextHistoryEntry = Boolean(options.skipInitialHistoryRecord);
   const view = new BrowserView({
     webPreferences: {
+      session: workspace.session,
       sandbox: false,
       nodeIntegration: false,
       contextIsolation: true
     }
   });
-  const hasInitialUrl = Boolean(initialUrl && initialUrl.trim().length > 0);
   const state = createBrowserState({
     id: tabId,
-    url: hasInitialUrl ? initialUrl : "",
+    url: initialUrl,
+    title: options.title || NEW_TAB_TITLE,
+    faviconUrl: options.faviconUrl,
     initialized: !hasInitialUrl
   });
-  browserTabs.set(tabId, { view, state });
+  workspace.tabs.set(tabId, { view, state });
 
   view.setBounds(browserBounds);
   view.setAutoResize({ width: false, height: false, horizontal: false, vertical: false });
@@ -6199,7 +6410,7 @@ function createBrowserTab(initialUrl?: string) {
 
     const shouldOpenAsTab = disposition === "foreground-tab" || disposition === "background-tab";
     if (shouldOpenAsTab) {
-      handleBrowserWindowOpenAsTab(normalizedUrl, disposition);
+      handleBrowserWindowOpenAsTab(workspaceId, normalizedUrl, disposition);
       return { action: "deny" };
     }
 
@@ -6215,6 +6426,7 @@ function createBrowserTab(initialUrl?: string) {
         autoHideMenuBar: true,
         backgroundColor: "#111214",
         webPreferences: {
+          session: workspace.session,
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: false
@@ -6244,7 +6456,7 @@ function createBrowserTab(initialUrl?: string) {
         return { action: "deny" };
       }
 
-      handleBrowserWindowOpenAsTab(normalizedUrl, disposition);
+      handleBrowserWindowOpenAsTab(workspaceId, normalizedUrl, disposition);
       return { action: "deny" };
     });
     window.once("ready-to-show", () => {
@@ -6260,34 +6472,35 @@ function createBrowserTab(initialUrl?: string) {
   view.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
 
   view.webContents.on("dom-ready", () => {
-    const currentTab = browserTabs.get(tabId);
+    const currentTab = browserWorkspaceFromMap(workspaceId)?.tabs.get(tabId);
     if (!currentTab) {
       return;
     }
-
     currentTab.state = { ...currentTab.state, initialized: true, error: "" };
-    syncBrowserState(tabId);
+    syncBrowserState(workspaceId, tabId);
   });
 
   view.webContents.on("did-start-loading", () => {
-    const currentTab = browserTabs.get(tabId);
+    const currentTab = browserWorkspaceFromMap(workspaceId)?.tabs.get(tabId);
     if (!currentTab) {
       return;
     }
-
     currentTab.state = { ...currentTab.state, loading: true, error: "" };
-    syncBrowserState(tabId);
+    syncBrowserState(workspaceId, tabId);
   });
 
   view.webContents.on("did-stop-loading", () => {
-    const currentTab = browserTabs.get(tabId);
+    const currentTab = browserWorkspaceFromMap(workspaceId)?.tabs.get(tabId);
     if (!currentTab) {
       return;
     }
-
     currentTab.state = { ...currentTab.state, loading: false, error: "" };
-    syncBrowserState(tabId);
-    void recordHistoryVisit({
+    syncBrowserState(workspaceId, tabId);
+    if (suppressNextHistoryEntry) {
+      suppressNextHistoryEntry = false;
+      return;
+    }
+    void recordHistoryVisit(workspaceId, {
       url: currentTab.view.webContents.getURL() || currentTab.state.url,
       title: currentTab.view.webContents.getTitle() || currentTab.state.title,
       faviconUrl: currentTab.state.faviconUrl
@@ -6295,131 +6508,80 @@ function createBrowserTab(initialUrl?: string) {
   });
 
   view.webContents.on("page-title-updated", () => {
-    syncBrowserState(tabId);
+    syncBrowserState(workspaceId, tabId);
   });
 
   view.webContents.on("page-favicon-updated", (_event, favicons) => {
-    const currentTab = browserTabs.get(tabId);
+    const currentTab = browserWorkspaceFromMap(workspaceId)?.tabs.get(tabId);
     if (!currentTab) {
       return;
     }
-
     currentTab.state = {
       ...currentTab.state,
       faviconUrl: favicons[0] || currentTab.state.faviconUrl
     };
-    emitBrowserState();
+    emitBrowserState(workspaceId);
+    void persistBrowserWorkspace(workspaceId);
   });
 
   view.webContents.on("did-navigate", () => {
-    syncBrowserState(tabId);
+    syncBrowserState(workspaceId, tabId);
   });
 
   view.webContents.on("did-navigate-in-page", () => {
-    syncBrowserState(tabId);
+    syncBrowserState(workspaceId, tabId);
   });
 
   view.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame) {
       return;
     }
-
-    const currentTab = browserTabs.get(tabId);
+    const currentTab = browserWorkspaceFromMap(workspaceId)?.tabs.get(tabId);
     if (!currentTab) {
       return;
     }
-
     currentTab.state = {
       ...currentTab.state,
       loading: false,
       error: `${errorDescription} (${errorCode})`,
       url: validatedURL || currentTab.state.url
     };
-    emitBrowserState();
+    emitBrowserState(workspaceId);
+    void persistBrowserWorkspace(workspaceId);
   });
 
   if (hasInitialUrl) {
-    void view.webContents.loadURL(initialUrl!).catch((error) => {
-      const currentTab = browserTabs.get(tabId);
+    void view.webContents.loadURL(initialUrl).catch((error) => {
+      const currentTab = browserWorkspaceFromMap(workspaceId)?.tabs.get(tabId);
       if (!currentTab) {
         return;
       }
-
       currentTab.state = {
         ...currentTab.state,
         loading: false,
         error: error instanceof Error ? error.message : "Failed to load page."
       };
-      emitBrowserState();
+      emitBrowserState(workspaceId);
+      void persistBrowserWorkspace(workspaceId);
     });
   }
 
   return tabId;
 }
 
-function ensureBrowserTabs() {
-  if (!mainWindow || browserTabs.size > 0) {
+function ensureBrowserWorkspaceDownloadTracking(workspace: BrowserWorkspaceState) {
+  if (workspace.downloadTrackingRegistered || browserDownloadTrackingPartitions.has(workspace.partition)) {
+    workspace.downloadTrackingRegistered = true;
     return;
   }
+  workspace.downloadTrackingRegistered = true;
+  browserDownloadTrackingPartitions.add(workspace.partition);
+  workspace.session.on("will-download", (_event, item: DownloadItem) => {
+    const currentWorkspace = browserWorkspaceFromMap(workspace.workspaceId);
+    if (!currentWorkspace) {
+      return;
+    }
 
-  const initialTabId = createBrowserTab(HOME_URL);
-  if (!initialTabId) {
-    return;
-  }
-
-  activeBrowserTabId = initialTabId;
-  updateAttachedBrowserView();
-}
-
-function setActiveBrowserTab(tabId: string) {
-  if (!browserTabs.has(tabId)) {
-    return getBrowserTabsSnapshot();
-  }
-
-  activeBrowserTabId = tabId;
-  updateAttachedBrowserView();
-  emitBrowserState();
-  return getBrowserTabsSnapshot();
-}
-
-function closeBrowserTab(tabId: string) {
-  const tab = browserTabs.get(tabId);
-  if (!tab) {
-    return getBrowserTabsSnapshot();
-  }
-
-  const tabIds = Array.from(browserTabs.keys());
-  const closedIndex = tabIds.indexOf(tabId);
-  browserTabs.delete(tabId);
-  tab.view.webContents.removeAllListeners();
-  void tab.view.webContents.close();
-
-  if (browserTabs.size === 0) {
-    const replacementTabId = createBrowserTab(HOME_URL);
-    activeBrowserTabId = replacementTabId ?? "";
-  } else if (activeBrowserTabId === tabId) {
-    const remainingIds = Array.from(browserTabs.keys());
-    activeBrowserTabId = remainingIds[Math.max(0, closedIndex - 1)] ?? remainingIds[0] ?? "";
-  }
-
-  updateAttachedBrowserView();
-  emitBrowserState();
-  return getBrowserTabsSnapshot();
-}
-
-function setBrowserBounds(bounds: BrowserBoundsPayload) {
-  browserBounds = {
-    x: Math.max(0, Math.round(bounds.x)),
-    y: Math.max(0, Math.round(bounds.y)),
-    width: Math.max(0, Math.round(bounds.width)),
-    height: Math.max(0, Math.round(bounds.height))
-  };
-
-  applyBoundsToTab(activeBrowserTabId);
-}
-
-function registerDownloadTracking() {
-  session.defaultSession.on("will-download", (_event, item: DownloadItem) => {
     const createdAt = new Date().toISOString();
     const downloadId = `download-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const savePath = path.join(app.getPath("downloads"), item.getFilename());
@@ -6437,14 +6599,20 @@ function registerDownloadTracking() {
       completedAt: null
     };
 
-    browserDownloads = [payload, ...browserDownloads].slice(0, 100);
-    emitDownloadsState();
-    void persistDownloads();
+    currentWorkspace.downloads = [payload, ...currentWorkspace.downloads].slice(0, 100);
+    emitDownloadsState(workspace.workspaceId);
+    void persistBrowserWorkspace(workspace.workspaceId);
 
     const updateDownload = (patch: Partial<BrowserDownloadPayload>) => {
-      browserDownloads = browserDownloads.map((download) => (download.id === downloadId ? { ...download, ...patch } : download));
-      emitDownloadsState();
-      void persistDownloads();
+      const latestWorkspace = browserWorkspaceFromMap(workspace.workspaceId);
+      if (!latestWorkspace) {
+        return;
+      }
+      latestWorkspace.downloads = latestWorkspace.downloads.map((download) =>
+        download.id === downloadId ? { ...download, ...patch } : download
+      );
+      emitDownloadsState(workspace.workspaceId);
+      void persistBrowserWorkspace(workspace.workspaceId);
     };
 
     item.on("updated", (_updatedEvent, state) => {
@@ -6466,6 +6634,137 @@ function registerDownloadTracking() {
       });
     });
   });
+}
+
+async function ensureBrowserWorkspace(workspaceId?: string | null): Promise<BrowserWorkspaceState | null> {
+  const normalizedWorkspaceId = typeof workspaceId === "string" ? workspaceId.trim() : activeBrowserWorkspaceId;
+  if (!normalizedWorkspaceId) {
+    return null;
+  }
+
+  const existing = browserWorkspaceFromMap(normalizedWorkspaceId);
+  if (existing) {
+    if (existing.tabs.size === 0) {
+      const initialTabId = createBrowserTab(normalizedWorkspaceId, { url: HOME_URL });
+      existing.activeTabId = initialTabId ?? "";
+      void persistBrowserWorkspace(normalizedWorkspaceId);
+    }
+    return existing;
+  }
+
+  const workspace = createBrowserWorkspaceState(normalizedWorkspaceId);
+  browserWorkspaces.set(normalizedWorkspaceId, workspace);
+  ensureBrowserWorkspaceDownloadTracking(workspace);
+
+  const persisted = await readJsonFile<BrowserWorkspacePersistencePayload>(
+    browserWorkspaceStatePath(normalizedWorkspaceId),
+    defaultBrowserWorkspacePersistence()
+  );
+  workspace.bookmarks = Array.isArray(persisted.bookmarks) ? persisted.bookmarks : [];
+  workspace.downloads = Array.isArray(persisted.downloads) ? persisted.downloads : [];
+  workspace.history = Array.isArray(persisted.history) ? persisted.history : [];
+
+  const persistedTabs = Array.isArray(persisted.tabs) ? persisted.tabs : [];
+  for (const persistedTab of persistedTabs) {
+    if (!persistedTab || typeof persistedTab !== "object") {
+      continue;
+    }
+    createBrowserTab(normalizedWorkspaceId, {
+      id: typeof persistedTab.id === "string" ? persistedTab.id : undefined,
+      url: typeof persistedTab.url === "string" && persistedTab.url.trim() ? persistedTab.url.trim() : HOME_URL,
+      title: typeof persistedTab.title === "string" ? persistedTab.title : NEW_TAB_TITLE,
+      faviconUrl: typeof persistedTab.faviconUrl === "string" ? persistedTab.faviconUrl : undefined,
+      skipInitialHistoryRecord: true
+    });
+  }
+
+  if (workspace.tabs.size === 0) {
+    createBrowserTab(normalizedWorkspaceId, { url: HOME_URL });
+  }
+
+  const persistedActiveTabId = typeof persisted.activeTabId === "string" ? persisted.activeTabId.trim() : "";
+  workspace.activeTabId = workspace.tabs.has(persistedActiveTabId)
+    ? persistedActiveTabId
+    : Array.from(workspace.tabs.keys())[0] ?? "";
+  return workspace;
+}
+
+async function setActiveBrowserWorkspace(workspaceId: string | null | undefined) {
+  const normalizedWorkspaceId = typeof workspaceId === "string" ? workspaceId.trim() : "";
+  activeBrowserWorkspaceId = normalizedWorkspaceId;
+  if (!normalizedWorkspaceId) {
+    emitBrowserState();
+    emitBookmarksState();
+    emitDownloadsState();
+    emitHistoryState();
+    return emptyBrowserTabListPayload();
+  }
+
+  await ensureBrowserWorkspace(normalizedWorkspaceId);
+  updateAttachedBrowserView();
+  emitBrowserState(normalizedWorkspaceId);
+  emitBookmarksState(normalizedWorkspaceId);
+  emitDownloadsState(normalizedWorkspaceId);
+  emitHistoryState(normalizedWorkspaceId);
+  return browserWorkspaceSnapshot(normalizedWorkspaceId);
+}
+
+async function setActiveBrowserTab(tabId: string) {
+  const workspace = await ensureBrowserWorkspace();
+  if (!workspace || !workspace.tabs.has(tabId)) {
+    return browserWorkspaceSnapshot();
+  }
+
+  workspace.activeTabId = tabId;
+  if (workspace.workspaceId === activeBrowserWorkspaceId) {
+    updateAttachedBrowserView();
+  }
+  emitBrowserState(workspace.workspaceId);
+  await persistBrowserWorkspace(workspace.workspaceId);
+  return browserWorkspaceSnapshot(workspace.workspaceId);
+}
+
+async function closeBrowserTab(tabId: string) {
+  const workspace = await ensureBrowserWorkspace();
+  const tab = workspace?.tabs.get(tabId);
+  if (!workspace || !tab) {
+    return browserWorkspaceSnapshot();
+  }
+
+  const tabIds = Array.from(workspace.tabs.keys());
+  const closedIndex = tabIds.indexOf(tabId);
+  workspace.tabs.delete(tabId);
+  closeBrowserTabRecord(tab);
+
+  if (workspace.tabs.size === 0) {
+    const replacementTabId = createBrowserTab(workspace.workspaceId, { url: HOME_URL });
+    workspace.activeTabId = replacementTabId ?? "";
+  } else if (workspace.activeTabId === tabId) {
+    const remainingIds = Array.from(workspace.tabs.keys());
+    workspace.activeTabId = remainingIds[Math.max(0, closedIndex - 1)] ?? remainingIds[0] ?? "";
+  }
+
+  if (workspace.workspaceId === activeBrowserWorkspaceId) {
+    updateAttachedBrowserView();
+  }
+  emitBrowserState(workspace.workspaceId);
+  await persistBrowserWorkspace(workspace.workspaceId);
+  return browserWorkspaceSnapshot(workspace.workspaceId);
+}
+
+function setBrowserBounds(bounds: BrowserBoundsPayload) {
+  browserBounds = {
+    x: Math.max(0, Math.round(bounds.x)),
+    y: Math.max(0, Math.round(bounds.y)),
+    width: Math.max(0, Math.round(bounds.width)),
+    height: Math.max(0, Math.round(bounds.height))
+  };
+
+  const workspace = activeBrowserWorkspace();
+  if (!workspace || !workspace.activeTabId) {
+    return;
+  }
+  applyBoundsToTab(workspace.workspaceId, workspace.activeTabId);
 }
 
 function createDownloadsPopupHtml() {
@@ -7494,9 +7793,10 @@ function createMainWindow() {
 
   mainWindow = win;
   browserBounds = { x: 0, y: 0, width: 0, height: 0 };
-  activeBrowserTabId = "";
-  browserTabs.clear();
-  ensureBrowserTabs();
+  activeBrowserWorkspaceId = "";
+  for (const workspaceId of Array.from(browserWorkspaces.keys())) {
+    destroyBrowserWorkspace(workspaceId);
+  }
 
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
@@ -7546,12 +7846,16 @@ function createMainWindow() {
     historyPopupWindow = null;
     overflowPopupWindow?.close();
     overflowPopupWindow = null;
-    browserTabs.clear();
+    for (const workspaceId of Array.from(browserWorkspaces.keys())) {
+      destroyBrowserWorkspace(workspaceId);
+    }
+    activeBrowserWorkspaceId = "";
     mainWindow = null;
   });
 }
 
-const singleInstanceLock = app.requestSingleInstanceLock();
+const singleInstanceLock =
+  process.env.HOLABOSS_DISABLE_SINGLE_INSTANCE_LOCK?.trim() === "1" ? true : app.requestSingleInstanceLock();
 if (!singleInstanceLock) {
   app.quit();
 } else {
@@ -7589,7 +7893,6 @@ if (!singleInstanceLock) {
 app.whenReady().then(async () => {
   await loadBrowserPersistence();
   await bootstrapRuntimeDatabase();
-  registerDownloadTracking();
 
   handleTrustedIpc("fs:listDirectory", ["main"], async (_event, targetPath?: string | null) => listDirectory(targetPath));
   handleTrustedIpc("fs:readFilePreview", ["main"], async (_event, targetPath: string) => readFilePreview(targetPath));
@@ -7804,97 +8107,95 @@ app.whenReady().then(async () => {
     verboseTelemetryEnabled ? sessionStreamDebugLog.slice(-600) : []
   );
   handleTrustedIpc("workspace:isVerboseTelemetryEnabled", ["main"], async () => verboseTelemetryEnabled);
-  ipcMain.handle("browser:getState", () => {
-    ensureBrowserTabs();
-    return getBrowserTabsSnapshot();
+  ipcMain.handle("browser:setActiveWorkspace", async (_event, workspaceId?: string | null) => {
+    return setActiveBrowserWorkspace(workspaceId);
   });
-  ipcMain.handle("browser:setBounds", (_event, bounds: BrowserBoundsPayload) => {
-    ensureBrowserTabs();
+  ipcMain.handle("browser:getState", async () => {
+    await ensureBrowserWorkspace();
+    return browserWorkspaceSnapshot();
+  });
+  ipcMain.handle("browser:setBounds", async (_event, bounds: BrowserBoundsPayload) => {
     setBrowserBounds(bounds);
-    return getBrowserTabsSnapshot();
+    return browserWorkspaceSnapshot();
   });
   ipcMain.handle("browser:navigate", async (_event, targetUrl: string) => {
-    ensureBrowserTabs();
-    const activeTab = getActiveBrowserTab();
-    if (!activeTab) {
-      return getBrowserTabsSnapshot();
+    if (!activeBrowserWorkspaceId) {
+      return emptyBrowserTabListPayload();
     }
-
-    try {
-      activeTab.state = { ...activeTab.state, error: "" };
-      await activeTab.view.webContents.loadURL(targetUrl);
-    } catch (error) {
-      activeTab.state = {
-        ...activeTab.state,
-        loading: false,
-        error: error instanceof Error ? error.message : "Failed to load URL."
-      };
-      emitBrowserState();
-    }
-
-    return getBrowserTabsSnapshot();
+    return navigateActiveBrowserTab(activeBrowserWorkspaceId, targetUrl);
   });
-  ipcMain.handle("browser:back", () => {
+  ipcMain.handle("browser:back", async () => {
+    await ensureBrowserWorkspace();
     const activeTab = getActiveBrowserTab();
     if (activeTab?.view.webContents.navigationHistory.canGoBack()) {
       activeTab.view.webContents.navigationHistory.goBack();
     }
-    return getBrowserTabsSnapshot();
+    return browserWorkspaceSnapshot();
   });
-  ipcMain.handle("browser:forward", () => {
+  ipcMain.handle("browser:forward", async () => {
+    await ensureBrowserWorkspace();
     const activeTab = getActiveBrowserTab();
     if (activeTab?.view.webContents.navigationHistory.canGoForward()) {
       activeTab.view.webContents.navigationHistory.goForward();
     }
-    return getBrowserTabsSnapshot();
+    return browserWorkspaceSnapshot();
   });
-  ipcMain.handle("browser:reload", () => {
+  ipcMain.handle("browser:reload", async () => {
+    await ensureBrowserWorkspace();
     getActiveBrowserTab()?.view.webContents.reload();
-    return getBrowserTabsSnapshot();
+    return browserWorkspaceSnapshot();
   });
   ipcMain.handle("browser:newTab", async (_event, targetUrl?: string) => {
-    ensureBrowserTabs();
-    const nextTabId = createBrowserTab(targetUrl);
-    if (nextTabId) {
-      activeBrowserTabId = nextTabId;
-      updateAttachedBrowserView();
-      emitBrowserState();
+    const workspace = await ensureBrowserWorkspace();
+    if (!workspace) {
+      return emptyBrowserTabListPayload();
     }
-    return getBrowserTabsSnapshot();
+    const nextTabId = createBrowserTab(workspace.workspaceId, { url: targetUrl });
+    if (nextTabId) {
+      workspace.activeTabId = nextTabId;
+      updateAttachedBrowserView();
+      emitBrowserState(workspace.workspaceId);
+      await persistBrowserWorkspace(workspace.workspaceId);
+    }
+    return browserWorkspaceSnapshot(workspace.workspaceId);
   });
-  ipcMain.handle("browser:setActiveTab", (_event, tabId: string) => {
-    ensureBrowserTabs();
+  ipcMain.handle("browser:setActiveTab", async (_event, tabId: string) => {
+    await ensureBrowserWorkspace();
     return setActiveBrowserTab(tabId);
   });
-  ipcMain.handle("browser:closeTab", (_event, tabId: string) => {
-    ensureBrowserTabs();
+  ipcMain.handle("browser:closeTab", async (_event, tabId: string) => {
+    await ensureBrowserWorkspace();
     return closeBrowserTab(tabId);
   });
-  ipcMain.handle("browser:getBookmarks", () => browserBookmarks);
+  ipcMain.handle("browser:getBookmarks", async () => {
+    const workspace = await ensureBrowserWorkspace();
+    return workspace?.bookmarks ?? [];
+  });
   ipcMain.handle("browser:addBookmark", async (_event, payload: { url: string; title?: string }) => {
+    const workspace = await ensureBrowserWorkspace();
     const url = payload.url.trim();
-    if (!url) {
-      return browserBookmarks;
+    if (!workspace || !url) {
+      return workspace?.bookmarks ?? [];
     }
 
     const activeTab = getActiveBrowserTab();
     const faviconUrl = activeTab?.state.url === url ? activeTab.state.faviconUrl : undefined;
 
-    const existing = browserBookmarks.find((bookmark) => bookmark.url === url);
+    const existing = workspace.bookmarks.find((bookmark) => bookmark.url === url);
     if (existing) {
       const nextTitle = payload.title?.trim() || existing.title;
       const nextFaviconUrl = faviconUrl || existing.faviconUrl;
       if (nextTitle !== existing.title || nextFaviconUrl !== existing.faviconUrl) {
-        browserBookmarks = browserBookmarks.map((bookmark) =>
+        workspace.bookmarks = workspace.bookmarks.map((bookmark) =>
           bookmark.id === existing.id ? { ...bookmark, title: nextTitle, faviconUrl: nextFaviconUrl } : bookmark
         );
-        emitBookmarksState();
-        await persistBookmarks();
+        emitBookmarksState(workspace.workspaceId);
+        await persistBrowserWorkspace(workspace.workspaceId);
       }
-      return browserBookmarks;
+      return workspace.bookmarks;
     }
 
-    browserBookmarks = [
+    workspace.bookmarks = [
       {
         id: `bookmark-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         url,
@@ -7902,20 +8203,30 @@ app.whenReady().then(async () => {
         faviconUrl,
         createdAt: new Date().toISOString()
       },
-      ...browserBookmarks
+      ...workspace.bookmarks
     ];
-    emitBookmarksState();
-    await persistBookmarks();
-    return browserBookmarks;
+    emitBookmarksState(workspace.workspaceId);
+    await persistBrowserWorkspace(workspace.workspaceId);
+    return workspace.bookmarks;
   });
   ipcMain.handle("browser:removeBookmark", async (_event, bookmarkId: string) => {
-    browserBookmarks = browserBookmarks.filter((bookmark) => bookmark.id !== bookmarkId);
-    emitBookmarksState();
-    await persistBookmarks();
-    return browserBookmarks;
+    const workspace = await ensureBrowserWorkspace();
+    if (!workspace) {
+      return [];
+    }
+    workspace.bookmarks = workspace.bookmarks.filter((bookmark) => bookmark.id !== bookmarkId);
+    emitBookmarksState(workspace.workspaceId);
+    await persistBrowserWorkspace(workspace.workspaceId);
+    return workspace.bookmarks;
   });
-  ipcMain.handle("browser:getDownloads", () => browserDownloads);
-  ipcMain.handle("browser:getHistory", () => browserHistory);
+  ipcMain.handle("browser:getDownloads", async () => {
+    const workspace = await ensureBrowserWorkspace();
+    return workspace?.downloads ?? [];
+  });
+  ipcMain.handle("browser:getHistory", async () => {
+    const workspace = await ensureBrowserWorkspace();
+    return workspace?.history ?? [];
+  });
   ipcMain.handle(
     "browser:showAddressSuggestions",
     (_event, anchorBounds: BrowserAnchorBoundsPayload, suggestions: AddressSuggestionPayload[], selectedIndex: number) => {
@@ -7945,10 +8256,10 @@ app.whenReady().then(async () => {
     historyPopupWindow?.hide();
   });
   ipcMain.handle("browser:openHistoryUrl", async (_event, targetUrl: string) => {
-    ensureBrowserTabs();
+    const workspace = await ensureBrowserWorkspace();
     const activeTab = getActiveBrowserTab();
-    if (!activeTab) {
-      return getBrowserTabsSnapshot();
+    if (!workspace || !activeTab) {
+      return browserWorkspaceSnapshot();
     }
 
     try {
@@ -7961,22 +8272,30 @@ app.whenReady().then(async () => {
         loading: false,
         error: error instanceof Error ? error.message : "Failed to load URL."
       };
-      emitBrowserState();
+      emitBrowserState(workspace.workspaceId);
     }
 
-    return getBrowserTabsSnapshot();
+    return browserWorkspaceSnapshot(workspace.workspaceId);
   });
   ipcMain.handle("browser:removeHistoryEntry", async (_event, historyId: string) => {
-    browserHistory = browserHistory.filter((entry) => entry.id !== historyId);
-    emitHistoryState();
-    await persistHistory();
-    return browserHistory;
+    const workspace = await ensureBrowserWorkspace();
+    if (!workspace) {
+      return [];
+    }
+    workspace.history = workspace.history.filter((entry) => entry.id !== historyId);
+    emitHistoryState(workspace.workspaceId);
+    await persistBrowserWorkspace(workspace.workspaceId);
+    return workspace.history;
   });
   ipcMain.handle("browser:clearHistory", async () => {
-    browserHistory = [];
-    emitHistoryState();
-    await persistHistory();
-    return browserHistory;
+    const workspace = await ensureBrowserWorkspace();
+    if (!workspace) {
+      return [];
+    }
+    workspace.history = [];
+    emitHistoryState(workspace.workspaceId);
+    await persistBrowserWorkspace(workspace.workspaceId);
+    return workspace.history;
   });
   ipcMain.handle("browser:toggleDownloadsPopup", (_event, anchorBounds: BrowserAnchorBoundsPayload) => {
     toggleDownloadsPopup(anchorBounds);
@@ -7985,7 +8304,8 @@ app.whenReady().then(async () => {
     downloadsPopupWindow?.hide();
   });
   ipcMain.handle("browser:showDownloadInFolder", async (_event, downloadId: string) => {
-    const download = browserDownloads.find((item) => item.id === downloadId);
+    const workspace = await ensureBrowserWorkspace();
+    const download = workspace?.downloads.find((item) => item.id === downloadId);
     if (!download?.targetPath) {
       return false;
     }
@@ -7993,7 +8313,8 @@ app.whenReady().then(async () => {
     return shell.showItemInFolder(download.targetPath);
   });
   ipcMain.handle("browser:openDownload", async (_event, downloadId: string) => {
-    const download = browserDownloads.find((item) => item.id === downloadId);
+    const workspace = await ensureBrowserWorkspace();
+    const download = workspace?.downloads.find((item) => item.id === downloadId);
     if (!download?.targetPath) {
       return "Download not found.";
     }

@@ -2,6 +2,7 @@ import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "
 import { ChevronLeft, ChevronRight, Download, Globe, Loader2, MoreHorizontal, Plus, RefreshCcw, Star, X } from "lucide-react";
 import { IconButton } from "@/components/ui/IconButton";
 import { PaneCard } from "@/components/ui/PaneCard";
+import { useWorkspaceSelection } from "@/lib/workspaceSelection";
 
 const HOME_URL = "https://www.google.com/";
 
@@ -39,6 +40,7 @@ function normalizeUrl(rawInput: string) {
 }
 
 export function BrowserPane() {
+  const { selectedWorkspaceId } = useWorkspaceSelection();
   const [browserState, setBrowserState] = useState<BrowserTabListPayload>(INITIAL_STATE);
   const [inputValue, setInputValue] = useState("");
   const [bookmarks, setBookmarks] = useState<BrowserBookmarkPayload[]>([]);
@@ -69,14 +71,21 @@ export function BrowserPane() {
       setBrowserState(state);
     };
 
-    void window.electronAPI.browser.getState().then(applyState);
+    if (!selectedWorkspaceId) {
+      applyState(INITIAL_STATE);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    void window.electronAPI.browser.setActiveWorkspace(selectedWorkspaceId).then(applyState);
     const unsubscribe = window.electronAPI.browser.onStateChange(applyState);
 
     return () => {
       mounted = false;
       unsubscribe();
     };
-  }, []);
+  }, [selectedWorkspaceId]);
 
   useEffect(() => {
     let mounted = true;
@@ -105,6 +114,16 @@ export function BrowserPane() {
       setHistoryEntries(nextHistory);
     };
 
+    if (!selectedWorkspaceId) {
+      applyBookmarks([]);
+      applyDownloads([]);
+      applyHistory([]);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    void window.electronAPI.browser.setActiveWorkspace(selectedWorkspaceId);
     void window.electronAPI.browser.getBookmarks().then(applyBookmarks);
     void window.electronAPI.browser.getDownloads().then(applyDownloads);
     void window.electronAPI.browser.getHistory().then(applyHistory);
@@ -118,7 +137,7 @@ export function BrowserPane() {
       unsubscribeDownloads();
       unsubscribeHistory();
     };
-  }, []);
+  }, [selectedWorkspaceId]);
 
   useEffect(() => {
     setInputValue(activeTab.url || "");

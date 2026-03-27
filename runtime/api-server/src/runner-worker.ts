@@ -236,9 +236,14 @@ export async function executeRunnerRequest(
 ): Promise<RunnerExecutionResult> {
   validateRunnerPayload(payload);
   const command = runnerCommand(payload);
+  const env = buildRunnerEnv();
+  const workspaceId = typeof payload.workspace_id === "string" ? payload.workspace_id.trim() : "";
+  if (workspaceId) {
+    env.HOLABOSS_WORKSPACE_ID = workspaceId;
+  }
   const child = spawn("/bin/bash", ["-lc", command], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: buildRunnerEnv()
+    env
   });
   const closePromise = new Promise<number>((resolve, reject) => {
     child.once("error", reject);

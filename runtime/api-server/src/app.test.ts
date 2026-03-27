@@ -134,15 +134,17 @@ test("browser capability routes proxy to the browser tool service", async () => 
     workspaceRoot: path.join(root, "workspace")
   });
   const browserToolService = {
-    async getStatus() {
+    async getStatus(context?: { workspaceId?: string | null }) {
       return {
         available: true,
+        workspace_id: context?.workspaceId ?? null,
         tools: [{ id: "browser_get_state" }]
       };
     },
-    async execute(toolId: string, args: Record<string, unknown>) {
+    async execute(toolId: string, args: Record<string, unknown>, context?: { workspaceId?: string | null }) {
       return {
         tool_id: toolId,
+        workspace_id: context?.workspaceId ?? null,
         args
       };
     }
@@ -151,17 +153,24 @@ test("browser capability routes proxy to the browser tool service", async () => 
 
   const statusResponse = await app.inject({
     method: "GET",
-    url: "/api/v1/capabilities/browser"
+    url: "/api/v1/capabilities/browser",
+    headers: {
+      "x-holaboss-workspace-id": "workspace-1"
+    }
   });
   assert.equal(statusResponse.statusCode, 200);
   assert.deepEqual(statusResponse.json(), {
     available: true,
+    workspace_id: "workspace-1",
     tools: [{ id: "browser_get_state" }]
   });
 
   const executeResponse = await app.inject({
     method: "POST",
     url: "/api/v1/capabilities/browser/tools/browser_click",
+    headers: {
+      "x-holaboss-workspace-id": "workspace-1"
+    },
     payload: {
       index: 3
     }
@@ -169,6 +178,7 @@ test("browser capability routes proxy to the browser tool service", async () => 
   assert.equal(executeResponse.statusCode, 200);
   assert.deepEqual(executeResponse.json(), {
     tool_id: "browser_click",
+    workspace_id: "workspace-1",
     args: {
       index: 3
     }

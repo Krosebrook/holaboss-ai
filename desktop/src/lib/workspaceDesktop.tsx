@@ -184,6 +184,7 @@ export function WorkspaceDesktopProvider({ children }: { children: ReactNode }) 
   const sessionTargetId = onboardingModeActive
     ? (selectedWorkspace?.onboarding_session_id || "").trim()
     : (selectedWorkspace?.main_session_id || "").trim();
+  const runtimeReadyForWorkspaceData = runtimeStatus?.status === "running";
 
   function setTemplateSourceMode(value: TemplateSourceMode) {
     setWorkspaceErrorMessage("");
@@ -319,10 +320,15 @@ export function WorkspaceDesktopProvider({ children }: { children: ReactNode }) 
       ]);
       setRuntimeConfig(nextRuntimeConfig);
       setRuntimeStatus(nextRuntimeStatus);
-      await loadWorkspaceData(true);
+      if (nextRuntimeStatus.status === "running") {
+        await loadWorkspaceData(true);
+      } else if (nextRuntimeStatus.status === "error" && nextRuntimeStatus.lastError.trim()) {
+        setWorkspaceErrorMessage(nextRuntimeStatus.lastError.trim());
+      }
     } catch (error) {
       setWorkspaceErrorMessage(normalizeErrorMessage(error));
     } finally {
+      setHasHydratedWorkspaceList(true);
       setIsRefreshing(false);
     }
   }
@@ -461,6 +467,23 @@ export function WorkspaceDesktopProvider({ children }: { children: ReactNode }) 
   useEffect(() => {
     let cancelled = false;
 
+    if (isLoadingBootstrap) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!runtimeReadyForWorkspaceData) {
+      setIsRefreshing(false);
+      setHasHydratedWorkspaceList(true);
+      if (runtimeStatus?.status === "error" && runtimeStatus.lastError.trim()) {
+        setWorkspaceErrorMessage((current) => current || runtimeStatus.lastError.trim());
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
     async function refresh() {
       setIsRefreshing(true);
       setWorkspaceErrorMessage("");
@@ -482,7 +505,7 @@ export function WorkspaceDesktopProvider({ children }: { children: ReactNode }) 
     return () => {
       cancelled = true;
     };
-  }, [resolvedUserId]);
+  }, [isLoadingBootstrap, resolvedUserId, runtimeReadyForWorkspaceData, runtimeStatus?.lastError, runtimeStatus?.status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -515,7 +538,7 @@ export function WorkspaceDesktopProvider({ children }: { children: ReactNode }) 
   }, [session]);
 
   useEffect(() => {
-    if (!selectedWorkspaceId) {
+    if (!selectedWorkspaceId || !runtimeReadyForWorkspaceData) {
       setInstalledApps([]);
       setIsLoadingInstalledApps(false);
       return;
@@ -546,10 +569,10 @@ export function WorkspaceDesktopProvider({ children }: { children: ReactNode }) 
     return () => {
       cancelled = true;
     };
-  }, [selectedWorkspace?.status, selectedWorkspace?.updated_at, selectedWorkspaceId]);
+  }, [runtimeReadyForWorkspaceData, selectedWorkspace?.status, selectedWorkspace?.updated_at, selectedWorkspaceId]);
 
   useEffect(() => {
-    if (!selectedWorkspaceId) {
+    if (!selectedWorkspaceId || !runtimeReadyForWorkspaceData) {
       return;
     }
 
@@ -569,7 +592,7 @@ export function WorkspaceDesktopProvider({ children }: { children: ReactNode }) 
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [selectedWorkspaceId]);
+  }, [runtimeReadyForWorkspaceData, selectedWorkspaceId]);
 
   useEffect(() => {
     if (!selectedWorkspaceId || !onboardingModeActive) {

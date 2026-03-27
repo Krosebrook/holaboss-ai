@@ -164,6 +164,7 @@ declare global {
   }
 
   interface WorkbenchOpenBrowserPayload {
+    workspaceId?: string | null;
     url?: string | null;
   }
 
@@ -635,6 +636,7 @@ declare global {
       onError: (callback: (context: AuthErrorPayload) => unknown) => () => void;
     };
     browser: {
+      setActiveWorkspace: (workspaceId?: string | null) => Promise<BrowserTabListPayload>;
       getState: () => Promise<BrowserTabListPayload>;
       setBounds: (bounds: BrowserBoundsPayload) => Promise<BrowserTabListPayload>;
       navigate: (targetUrl: string) => Promise<BrowserTabListPayload>;

@@ -220,6 +220,14 @@ function optionalStringList(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string");
 }
 
+function headerString(headers: Record<string, unknown>, key: string): string {
+  const raw = headers[key];
+  if (Array.isArray(raw)) {
+    return typeof raw[0] === "string" ? raw[0].trim() : "";
+  }
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
 function parseSessionInputAttachment(value: unknown): SessionInputAttachmentPayload | null {
   if (!isRecord(value)) {
     return null;
@@ -1092,9 +1100,9 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
   });
 
   app.get("/api/v1/capabilities/browser", async (request, reply) => {
-    void request;
+    const workspaceId = headerString(request.headers as Record<string, unknown>, "x-holaboss-workspace-id");
     try {
-      return await browserToolService.getStatus();
+      return await browserToolService.getStatus({ workspaceId });
     } catch (error) {
       if (error instanceof DesktopBrowserToolServiceError) {
         return sendError(reply, error.statusCode, error.message);
@@ -1108,8 +1116,9 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
       return sendError(reply, 400, "request body must be an object");
     }
     const params = request.params as { toolId: string };
+    const workspaceId = headerString(request.headers as Record<string, unknown>, "x-holaboss-workspace-id");
     try {
-      return await browserToolService.execute(requiredString(params.toolId, "toolId"), request.body);
+      return await browserToolService.execute(requiredString(params.toolId, "toolId"), request.body, { workspaceId });
     } catch (error) {
       if (error instanceof DesktopBrowserToolServiceError) {
         return sendError(reply, error.statusCode, error.message);
