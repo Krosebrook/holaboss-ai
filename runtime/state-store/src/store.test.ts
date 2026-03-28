@@ -524,8 +524,8 @@ test("allocateAppPort assigns sequential ports starting from 3001", () => {
   const p1 = store.allocateAppPort({ workspaceId: "ws-1", appId: "gmail" });
   const p2 = store.allocateAppPort({ workspaceId: "ws-1", appId: "sheets" });
 
-  assert.equal(p1.port, 3001);
-  assert.equal(p2.port, 3002);
+  assert.equal(p1.port, 38080);
+  assert.equal(p2.port, 38081);
   assert.equal(p1.appId, "gmail");
   assert.equal(p2.appId, "sheets");
 

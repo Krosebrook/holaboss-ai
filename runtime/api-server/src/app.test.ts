@@ -1485,6 +1485,93 @@ test("app lifecycle routes delegate to the lifecycle executor and uninstall upda
   store.close();
 });
 
+test("app start queues lifecycle setup apps in background", async () => {
+  const root = makeTempDir("hb-runtime-api-");
+  const workspaceRoot = path.join(root, "workspace");
+  const store = new RuntimeStateStore({
+    dbPath: path.join(root, "runtime.db"),
+    workspaceRoot
+  });
+  const workspace = store.createWorkspace({
+    workspaceId: "workspace-1",
+    name: "Workspace Apps",
+    harness: "opencode",
+    status: "active"
+  });
+
+  const workspaceDir = path.join(workspaceRoot, workspace.id);
+  fs.mkdirSync(path.join(workspaceDir, "apps", "app-a"), { recursive: true });
+  fs.writeFileSync(
+    path.join(workspaceDir, "apps", "app-a", "app.runtime.yaml"),
+    [
+      "app_id: app-a",
+      "mcp:",
+      "  port: 4100",
+      "healthchecks:",
+      "  mcp:",
+      "    path: /health",
+      "    timeout_s: 30",
+      "lifecycle:",
+      "  setup: npm install",
+      "  start: npm run start"
+    ].join("\n"),
+    "utf8"
+  );
+  fs.writeFileSync(
+    path.join(workspaceDir, "workspace.yaml"),
+    [
+      "applications:",
+      "  - app_id: app-a",
+      "    config_path: apps/app-a/app.runtime.yaml"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const calls: Array<Record<string, unknown>> = [];
+  const executor: AppLifecycleExecutorLike = {
+    async startApp(params) {
+      calls.push({ action: "start", ...params });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return {
+        app_id: params.appId,
+        status: "started",
+        detail: "app started with lifecycle manager",
+        ports: { http: params.httpPort ?? 18080, mcp: params.mcpPort ?? 13100 }
+      };
+    },
+    async stopApp() {
+      throw new Error("not used");
+    },
+    async shutdownAll() {
+      throw new Error("not used");
+    }
+  };
+  const app = buildTestRuntimeApiServer({ store, appLifecycleExecutor: executor });
+
+  const started = await app.inject({
+    method: "POST",
+    url: "/api/v1/apps/app-a/start",
+    payload: { workspace_id: workspace.id, holaboss_user_id: "user-1" }
+  });
+
+  assert.equal(started.statusCode, 200);
+  assert.deepEqual(started.json(), {
+    app_id: "app-a",
+    status: "building",
+    detail: "App start queued in background",
+    ports: { http: 18080, mcp: 13100 }
+  });
+  assert.equal(store.getAppBuild({ workspaceId: workspace.id, appId: "app-a" })?.status, "building");
+
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(store.getAppBuild({ workspaceId: workspace.id, appId: "app-a" })?.status, "running");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.skipSetup, false);
+
+  await app.close();
+  store.close();
+});
+
 test("app setup route does not start duplicate setup for an app already building", async () => {
   const root = makeTempDir("hb-runtime-api-");
   const workspaceRoot = path.join(root, "workspace");

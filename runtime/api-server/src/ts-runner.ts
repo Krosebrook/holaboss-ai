@@ -15,6 +15,7 @@ import { bootstrapResolvedApplications } from "./resolved-app-bootstrap.js";
 import {
   effectiveMcpServerPayloads,
   encodeWorkspaceMcpCatalog,
+  mergePreparedMcpServerPayloads,
   mcpServerIdMap,
   mcpServerMappingMetadata,
   workspaceMcpCatalogFingerprint,
@@ -747,7 +748,8 @@ export async function executeTsRunnerRequest(
       : [];
 
     if (runnerPrepPlan.bootstrapResolvedApplications && compiledPlan.resolved_applications.length > 0) {
-      effectiveMcpServers = effectiveMcpServers.concat(
+      effectiveMcpServers = mergePreparedMcpServerPayloads(
+        effectiveMcpServers,
         await deps.bootstrapApplications({
           request,
           workspaceDir: bootstrap.workspaceDir,
@@ -774,6 +776,14 @@ export async function executeTsRunnerRequest(
         stagedSkillsChanged: stagedSkills.changed || stagedBrowserTools.changed
       });
 
+    const backendBaseUrl = harnessPlugin.backendBaseUrl({
+      workspaceId: request.workspace_id,
+      workspaceDir: bootstrap.workspaceDir
+    });
+    if (harnessAdapter.capabilities.requiresBackend && !backendBaseUrl.trim()) {
+      throw new Error(`backend base URL was not resolved for harness '${bootstrap.harness}'`);
+    }
+
     const harnessResult = await deps.runHarnessHost({
       harness: bootstrap.harness,
       requestPayload: harnessAdapter.buildHarnessHostRequest({
@@ -796,7 +806,7 @@ export async function executeTsRunnerRequest(
           mcpServers: effectiveMcpServers,
           sidecar
         }),
-        backendBaseUrl: harnessPlugin.backendBaseUrl(),
+        backendBaseUrl,
         timeoutSeconds: harnessPlugin.timeoutSeconds()
       }),
       workspaceDir: bootstrap.workspaceDir,

@@ -176,7 +176,7 @@ export function WorkspaceDesktopProvider({ children }: { children: ReactNode }) 
 
   const isSignedIn = Boolean(sessionUserId(session));
   const resolvedUserId = runtimeConfig?.userId?.trim() || sessionUserId(session);
-  const canUseMarketplaceTemplates = isSignedIn && Boolean(runtimeConfig?.authTokenPresent);
+  const canUseMarketplaceTemplates = Boolean(runtimeConfig?.authTokenPresent) && Boolean((resolvedUserId || "").trim());
   const selectedWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null,
     [selectedWorkspaceId, workspaces]
@@ -370,10 +370,10 @@ export function WorkspaceDesktopProvider({ children }: { children: ReactNode }) 
       let response: WorkspaceResponsePayload;
       if (templateSourceMode === "marketplace") {
         if (!canUseMarketplaceTemplates) {
-          throw new Error("Sign in and finish runtime setup to use marketplace templates.");
+          throw new Error("Runtime binding is required to use marketplace templates.");
         }
         if (!resolvedUserId) {
-          throw new Error("Signed-in user id is required for marketplace templates.");
+          throw new Error("A runtime user id is required for marketplace templates.");
         }
         if (!selectedMarketplaceTemplate) {
           throw new Error("Choose a marketplace template first.");

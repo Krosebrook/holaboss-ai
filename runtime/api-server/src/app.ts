@@ -65,6 +65,7 @@ import {
   listWorkspaceApplications,
   parseInstalledAppRuntime,
   portsForAppIndex,
+  releaseWorkspaceAppPorts,
   removeWorkspaceApplication,
   resolveWorkspaceApp,
   resolveWorkspaceAppRuntime,
@@ -1756,7 +1757,11 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
     if (!workspaceDir || !fs.existsSync(path.join(workspaceDir, "workspace.yaml"))) {
       return {};
     }
-    return listWorkspaceApplicationPorts(workspaceDir);
+    return listWorkspaceApplicationPorts(workspaceDir, {
+      store,
+      workspaceId: workspaceId ?? null,
+      allocatePorts: true
+    });
   });
 
   app.post("/api/v1/apps/:appId/start", async (request, reply) => {
@@ -1778,7 +1783,11 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
     const workspaceDir = store.workspaceDir(workspaceId);
     let resolvedApp;
     try {
-      resolvedApp = resolveWorkspaceAppRuntime(workspaceDir, appId);
+      resolvedApp = resolveWorkspaceAppRuntime(workspaceDir, appId, {
+        store,
+        workspaceId,
+        allocatePorts: true
+      });
     } catch (error) {
       const statusCode =
         typeof error === "object" && error !== null && "statusCode" in error && typeof (error as { statusCode: unknown }).statusCode === "number"
@@ -1789,6 +1798,57 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
     try {
       const holabossUserId = optionalString(request.body.holaboss_user_id);
       const build = store.getAppBuild({ workspaceId, appId });
+      const needsSetup =
+        !appBuildHasCompletedSetup(build?.status) &&
+        resolvedApp.resolvedApp.lifecycle.setup.trim().length > 0;
+
+      if (needsSetup) {
+        store.upsertAppBuild({
+          workspaceId,
+          appId,
+          status: "building"
+        });
+        void appLifecycleExecutor
+          .startApp({
+            appId,
+            appDir: resolvedApp.appDir,
+            httpPort: resolvedApp.ports.http,
+            mcpPort: resolvedApp.ports.mcp,
+            holabossUserId,
+            resolvedApp: resolvedApp.resolvedApp,
+            skipSetup: false
+          })
+          .then((result) => {
+            store.upsertAppBuild({
+              workspaceId,
+              appId,
+              status: result.status === "started" ? "running" : result.status
+            });
+          })
+          .catch((error) => {
+            store.upsertAppBuild({
+              workspaceId,
+              appId,
+              status: "failed",
+              error: error instanceof Error ? error.message : String(error)
+            });
+            app.log.error(
+              {
+                workspaceId,
+                appId,
+                error: error instanceof Error ? error.message : String(error)
+              },
+              "background app start failed"
+            );
+          });
+        return {
+          app_id: appId,
+          status: "building",
+          detail: "App start queued in background",
+          ports: { http: resolvedApp.ports.http, mcp: resolvedApp.ports.mcp }
+        };
+      }
+
       const result = await appLifecycleExecutor.startApp({
         appId,
         appDir: resolvedApp.appDir,
@@ -1831,7 +1891,10 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
     const workspaceDir = store.workspaceDir(workspaceId);
     let resolvedApp;
     try {
-      resolvedApp = resolveWorkspaceAppRuntime(workspaceDir, appId);
+      resolvedApp = resolveWorkspaceAppRuntime(workspaceDir, appId, {
+        store,
+        workspaceId
+      });
     } catch (error) {
       const statusCode =
         typeof error === "object" && error !== null && "statusCode" in error && typeof (error as { statusCode: unknown }).statusCode === "number"
@@ -2069,7 +2132,10 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
     const workspaceDir = store.workspaceDir(workspaceId);
 
     try {
-      const resolvedApp = resolveWorkspaceAppRuntime(workspaceDir, appId);
+      const resolvedApp = resolveWorkspaceAppRuntime(workspaceDir, appId, {
+        store,
+        workspaceId
+      });
       await appLifecycleExecutor.stopApp({
         appId,
         appDir: resolvedApp.appDir,
@@ -2081,6 +2147,7 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
 
     fs.rmSync(path.join(workspaceDir, "apps", appId), { recursive: true, force: true });
     removeWorkspaceApplication(workspaceDir, appId);
+    releaseWorkspaceAppPorts({ store, workspaceId, appId });
     store.deleteAppBuild({ workspaceId, appId });
     return {
       app_id: appId,

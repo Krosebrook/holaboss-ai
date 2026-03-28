@@ -25,6 +25,7 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { request as httpsRequest } from "node:https";
 import path from "node:path";
 import { URL } from "node:url";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const verboseTelemetryEnabled = process.env.HOLABOSS_VERBOSE_TELEMETRY?.trim() === "1";
@@ -348,7 +349,6 @@ let appUpdateStatus: AppUpdateStatusPayload = {
 };
 
 const RUNTIME_API_PORT = 5060;
-const RUNTIME_OPENCODE_PORT = 5096;
 const DEV_RUNTIME_ROOT = "/tmp/holaboss-runtime-macos-full";
 const STAGED_RUNTIME_ROOT = path.join("out", "runtime-macos");
 const DESKTOP_USER_DATA_DIR = (process.env.HOLABOSS_DESKTOP_USER_DATA_DIR?.trim() || "holaboss-local").replace(
@@ -1202,6 +1202,7 @@ interface MaterializedTemplateFilePayload {
   path: string;
   content_base64: string;
   executable: boolean;
+  symlink_target?: string | null;
 }
 
 interface MaterializeTemplateResponsePayload {
@@ -2532,6 +2533,22 @@ function runtimeBindingModelProxyApiKey(binding: RuntimeBindingExchangePayload):
   return (binding.model_proxy_api_key || binding.auth_token || "").trim();
 }
 
+function runtimeConfigHasBindingMaterial(config: Record<string, string>): boolean {
+  return (
+    Boolean(runtimeModelProxyApiKeyFromConfig(config)) &&
+    Boolean((config.user_id || "").trim()) &&
+    Boolean((config.sandbox_id || "").trim()) &&
+    Boolean((config.model_proxy_base_url || "").trim())
+  );
+}
+
+function canUsePersistedRuntimeBindingWithoutAuth(config: Record<string, string>): boolean {
+  if (process.env.HOLABOSS_INTERNAL_DEV?.trim() !== "1") {
+    return false;
+  }
+  return runtimeConfigHasBindingMaterial(config);
+}
+
 async function writeRuntimeConfigFile(update: RuntimeConfigUpdatePayload) {
   const current = await readRuntimeConfigFile();
   const currentDocument = await readRuntimeConfigDocument();
@@ -3020,6 +3037,9 @@ async function ensureRuntimeBindingReadyForWorkspaceFlow(
 
   const user = await getAuthenticatedUser();
   if (!user) {
+    if (canUsePersistedRuntimeBindingWithoutAuth(currentConfig)) {
+      return;
+    }
     if (runtimeModelProxyApiKeyFromConfig(currentConfig)) {
       await clearRuntimeBindingSecrets(`${reason}:missing_auth_session`);
     }
@@ -3046,10 +3066,7 @@ async function ensureRuntimeBindingReadyForWorkspaceFlow(
   }
 
   const refreshedConfig = await readRuntimeConfigFile();
-  const hasBindingMaterial =
-    Boolean(runtimeModelProxyApiKeyFromConfig(refreshedConfig)) &&
-    Boolean((refreshedConfig.sandbox_id || "").trim()) &&
-    Boolean((refreshedConfig.model_proxy_base_url || "").trim());
+  const hasBindingMaterial = runtimeConfigHasBindingMaterial(refreshedConfig);
   if (!hasBindingMaterial) {
     await clearRuntimeBindingSecrets(`${reason}:binding_incomplete`);
     throw new Error("Runtime binding is incomplete. Sign in again.");
@@ -3557,31 +3574,469 @@ async function updateTaskProposalState(
   });
 }
 
-async function collectLocalTemplateFiles(templateRoot: string): Promise<MaterializedTemplateFilePayload[]> {
+const LOCAL_TEMPLATE_IGNORE_NAMES = new Set([
+  ".git",
+  "node_modules",
+  ".output",
+  "dist",
+  "build",
+  ".turbo",
+  "coverage",
+  ".DS_Store"
+]);
+const LOCAL_TEMPLATE_APP_BINDINGS: Record<string, string[]> = {
+  build_in_public: ["github", "twitter"],
+  crm: ["gmail", "sheets"],
+  gmail_assistant: ["gmail"],
+  social_media: ["twitter", "linkedin", "reddit"],
+  social_operator: ["twitter", "linkedin", "reddit"]
+};
+const LOCAL_APP_MCP_PORT_BASE = 13100;
+const LOCAL_DEFAULT_APP_MCP_TIMEOUT_MS = 60000;
+const LOCAL_MCP_TOOL_CALL_PATTERN = /\btool\(\s*["']([^"']+)["']/g;
+const LOCAL_MCP_SOURCE_PATH_PATTERN = /(^|\/)(mcp\.(ts|tsx|js|mjs|cjs|py))$/;
+
+interface LocalAppTemplateBinding {
+  lifecycle: Record<string, string> | null;
+  path: string | null;
+  timeoutMs: number;
+  toolNames: string[];
+}
+
+function shouldSkipLocalTemplateEntry(name: string) {
+  return LOCAL_TEMPLATE_IGNORE_NAMES.has(name);
+}
+
+function decodeMaterializedTemplateFile(file: MaterializedTemplateFilePayload): string {
+  return Buffer.from(file.content_base64, "base64").toString("utf-8");
+}
+
+function extractLocalAppToolNames(
+  appFiles: MaterializedTemplateFilePayload[],
+  declaredToolNames: string[]
+): string[] {
+  const toolNames = [...declaredToolNames];
+  const seenToolNames = new Set(toolNames);
+  for (const file of appFiles) {
+    if (!LOCAL_MCP_SOURCE_PATH_PATTERN.test(file.path)) {
+      continue;
+    }
+    const source = decodeMaterializedTemplateFile(file);
+    for (const match of source.matchAll(LOCAL_MCP_TOOL_CALL_PATTERN)) {
+      const toolName = match[1]?.trim();
+      if (!toolName || seenToolNames.has(toolName)) {
+        continue;
+      }
+      seenToolNames.add(toolName);
+      toolNames.push(toolName);
+    }
+  }
+  return toolNames;
+}
+
+function replaceOrAppendMaterializedTemplateFile(
+  files: MaterializedTemplateFilePayload[],
+  nextFile: MaterializedTemplateFilePayload
+) {
+  const index = files.findIndex((file) => file.path === nextFile.path);
+  if (index === -1) {
+    files.push(nextFile);
+    return;
+  }
+  files[index] = nextFile;
+}
+
+function localModulesRootCandidates() {
+  return [
+    internalOverride("HOLABOSS_MODULES_ROOT"),
+    path.resolve(process.cwd(), "..", "..", "holaboss-modules"),
+    path.resolve(process.cwd(), "..", "holaboss-modules"),
+    path.resolve(app.getAppPath(), "..", "..", "..", "..", "holaboss-modules")
+  ].filter(Boolean);
+}
+
+function resolveLocalModulesRoot() {
+  for (const candidate of localModulesRootCandidates()) {
+    const resolved = path.resolve(candidate);
+    if (existsSync(resolved)) {
+      return resolved;
+    }
+  }
+  return null;
+}
+
+async function collectLocalTrackedFiles(sourceRoot: string): Promise<MaterializedTemplateFilePayload[]> {
   const files: MaterializedTemplateFilePayload[] = [];
 
   async function walk(currentDir: string) {
     const entries = await fs.readdir(currentDir, { withFileTypes: true });
     for (const entry of entries) {
+      if (shouldSkipLocalTemplateEntry(entry.name)) {
+        continue;
+      }
       const absolutePath = path.join(currentDir, entry.name);
       if (entry.isDirectory()) {
         await walk(absolutePath);
         continue;
       }
-      const relativePath = path.relative(templateRoot, absolutePath).split(path.sep).join("/");
-      const content = await fs.readFile(absolutePath);
-      const stats = await fs.stat(absolutePath);
-      files.push({
-        path: relativePath,
-        content_base64: content.toString("base64"),
-        executable: Boolean(stats.mode & 0o111),
-      });
+      const relativePath = path.relative(sourceRoot, absolutePath).split(path.sep).join("/");
+      const stats = await fs.lstat(absolutePath);
+      if (stats.isSymbolicLink()) {
+        files.push({
+          path: relativePath,
+          content_base64: "",
+          executable: false,
+          symlink_target: await fs.readlink(absolutePath),
+        });
+      } else {
+        const content = await fs.readFile(absolutePath);
+        files.push({
+          path: relativePath,
+          content_base64: content.toString("base64"),
+          executable: Boolean(stats.mode & 0o111),
+        });
+      }
     }
   }
 
-  await walk(templateRoot);
+  await walk(sourceRoot);
   files.sort((left, right) => left.path.localeCompare(right.path));
   return files;
+}
+
+async function collectLocalDirectoryFiles(sourceRoot: string, relativeRoot: string): Promise<MaterializedTemplateFilePayload[]> {
+  const files: MaterializedTemplateFilePayload[] = [];
+
+  async function walk(currentDir: string) {
+    const entries = await fs.readdir(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === ".DS_Store") {
+        continue;
+      }
+      const absolutePath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolutePath);
+        continue;
+      }
+      const relativePath = path.join(relativeRoot, path.relative(sourceRoot, absolutePath)).split(path.sep).join("/");
+      const stats = await fs.lstat(absolutePath);
+      if (stats.isSymbolicLink()) {
+        files.push({
+          path: relativePath,
+          content_base64: "",
+          executable: false,
+          symlink_target: await fs.readlink(absolutePath)
+        });
+      } else {
+        const content = await fs.readFile(absolutePath);
+        files.push({
+          path: relativePath,
+          content_base64: content.toString("base64"),
+          executable: Boolean(stats.mode & 0o111)
+        });
+      }
+    }
+  }
+
+  if (!existsSync(sourceRoot)) {
+    return files;
+  }
+
+  await walk(sourceRoot);
+  files.sort((left, right) => left.path.localeCompare(right.path));
+  return files;
+}
+
+function extractLocalAppTemplateBinding(
+  appFiles: MaterializedTemplateFilePayload[],
+  appRuntimeFile: MaterializedTemplateFilePayload | null
+): LocalAppTemplateBinding | null {
+  if (!appRuntimeFile) {
+    return null;
+  }
+
+  const loaded = parseYaml(decodeMaterializedTemplateFile(appRuntimeFile));
+  if (!loaded || typeof loaded !== "object") {
+    return null;
+  }
+
+  const data = loaded as Record<string, unknown>;
+  const lifecycleSource = data.lifecycle && typeof data.lifecycle === "object"
+    ? (data.lifecycle as Record<string, unknown>)
+    : null;
+  const lifecycle: Record<string, string> = {};
+  for (const key of ["setup", "start", "stop"]) {
+    const value = lifecycleSource?.[key];
+    if (typeof value === "string" && value.trim()) {
+      lifecycle[key] = value.trim();
+    }
+  }
+
+  const mcpSource = data.mcp && typeof data.mcp === "object" ? (data.mcp as Record<string, unknown>) : null;
+  const healthchecksSource =
+    data.healthchecks && typeof data.healthchecks === "object"
+      ? (data.healthchecks as Record<string, unknown>)
+      : null;
+
+  let timeoutMs = LOCAL_DEFAULT_APP_MCP_TIMEOUT_MS;
+  for (const key of ["mcp", "api"]) {
+    const healthcheck = healthchecksSource?.[key];
+    if (!healthcheck || typeof healthcheck !== "object") {
+      continue;
+    }
+    const timeoutSeconds = (healthcheck as Record<string, unknown>).timeout_s;
+    if (typeof timeoutSeconds === "number" && Number.isFinite(timeoutSeconds)) {
+      timeoutMs = Math.max(1000, Math.round(timeoutSeconds * 1000));
+      break;
+    }
+    if (typeof timeoutSeconds === "string" && timeoutSeconds.trim()) {
+      const parsed = Number.parseInt(timeoutSeconds.trim(), 10);
+      if (Number.isFinite(parsed)) {
+        timeoutMs = Math.max(1000, parsed * 1000);
+        break;
+      }
+    }
+  }
+
+  const toolsSource = Array.isArray(data.tools) ? data.tools : [];
+  const declaredToolNames = toolsSource
+    .map((tool) => (tool && typeof tool === "object" && typeof (tool as Record<string, unknown>).name === "string"
+      ? String((tool as Record<string, unknown>).name).trim()
+      : ""))
+    .filter(Boolean);
+  const toolNames = extractLocalAppToolNames(appFiles, declaredToolNames);
+
+  const mcpEnabled = mcpSource?.enabled !== false;
+  const mcpPath =
+    mcpEnabled && typeof mcpSource?.path === "string" && mcpSource.path.trim()
+      ? mcpSource.path.trim()
+      : mcpEnabled
+        ? "/mcp"
+        : null;
+
+  if (Object.keys(lifecycle).length === 0 && !mcpPath) {
+    return null;
+  }
+
+  return {
+    lifecycle: Object.keys(lifecycle).length > 0 ? lifecycle : null,
+    path: mcpPath,
+    timeoutMs,
+    toolNames
+  };
+}
+
+function ensureWorkspaceMcpRegistry(
+  data: Record<string, unknown>
+): {
+  allowlist: Record<string, unknown>;
+  toolIds: string[];
+  servers: Record<string, unknown>;
+} {
+  const registry =
+    data.mcp_registry && typeof data.mcp_registry === "object"
+      ? (data.mcp_registry as Record<string, unknown>)
+      : {};
+  data.mcp_registry = registry;
+
+  const allowlist =
+    registry.allowlist && typeof registry.allowlist === "object"
+      ? (registry.allowlist as Record<string, unknown>)
+      : {};
+  registry.allowlist = allowlist;
+
+  const toolIds = Array.isArray(allowlist.tool_ids)
+    ? allowlist.tool_ids.filter((value): value is string => typeof value === "string")
+    : [];
+  allowlist.tool_ids = toolIds;
+
+  const servers =
+    registry.servers && typeof registry.servers === "object"
+      ? (registry.servers as Record<string, unknown>)
+      : {};
+  registry.servers = servers;
+
+  if (!registry.catalog || typeof registry.catalog !== "object") {
+    registry.catalog = {};
+  }
+
+  return { allowlist, toolIds, servers };
+}
+
+function appendApplicationToWorkspaceYaml(
+  workspaceYamlContent: string,
+  appId: string,
+  configPath: string,
+  appFiles: MaterializedTemplateFilePayload[],
+  appIndex: number
+) {
+  const loaded = parseYaml(workspaceYamlContent);
+  const data = loaded && typeof loaded === "object" ? (loaded as Record<string, unknown>) : {};
+  const applications = Array.isArray(data.applications) ? [...data.applications] : [];
+  let applicationEntry = applications.find(
+    (entry) => entry && typeof entry === "object" && String((entry as Record<string, unknown>).app_id || "") === appId
+  ) as Record<string, unknown> | undefined;
+
+  if (!applicationEntry) {
+    applicationEntry = { app_id: appId, config_path: configPath };
+    applications.push(applicationEntry);
+  } else {
+    applicationEntry.config_path = configPath;
+  }
+  data.applications = applications;
+
+  const binding = extractLocalAppTemplateBinding(
+    appFiles,
+    appFiles.find((file) => file.path === "app.runtime.yaml") ?? null
+  );
+  if (binding?.lifecycle) {
+    applicationEntry.lifecycle = binding.lifecycle;
+  }
+
+  if (binding?.path) {
+    const { toolIds, servers } = ensureWorkspaceMcpRegistry(data);
+    servers[appId] = {
+      type: "remote",
+      url: `http://localhost:${LOCAL_APP_MCP_PORT_BASE + appIndex}${binding.path}`,
+      enabled: true,
+      timeout_ms: binding.timeoutMs
+    };
+    const seenToolIds = new Set(toolIds);
+    for (const toolName of binding.toolNames) {
+      const toolId = `${appId}.${toolName}`;
+      if (!seenToolIds.has(toolId)) {
+        toolIds.push(toolId);
+        seenToolIds.add(toolId);
+      }
+    }
+  }
+
+  return stringifyYaml(data, { defaultStringType: "QUOTE_DOUBLE" }).trimEnd();
+}
+
+function readLocalTemplateAppIds(templateRoot: string, workspaceYamlContent: string) {
+  const loaded = parseYaml(workspaceYamlContent);
+  const data = loaded && typeof loaded === "object" ? (loaded as Record<string, unknown>) : {};
+  const applications = Array.isArray(data.applications) ? data.applications : [];
+  if (applications.length > 0) {
+    return [];
+  }
+
+  const templateId =
+    (typeof data.template_id === "string" && data.template_id.trim()) ||
+    path.basename(templateRoot).trim();
+  return LOCAL_TEMPLATE_APP_BINDINGS[templateId] ?? [];
+}
+
+async function enrichLocalTemplateWithApps(
+  templateRoot: string,
+  files: MaterializedTemplateFilePayload[]
+): Promise<MaterializedTemplateFilePayload[]> {
+  if (process.env.HOLABOSS_INTERNAL_DEV?.trim() !== "1") {
+    return files;
+  }
+
+  const workspaceYamlFile = files.find((file) => file.path === "workspace.yaml");
+  if (!workspaceYamlFile) {
+    return files;
+  }
+
+  const workspaceYamlContent = decodeMaterializedTemplateFile(workspaceYamlFile);
+  const appIds = readLocalTemplateAppIds(templateRoot, workspaceYamlContent);
+  if (appIds.length === 0) {
+    return files;
+  }
+
+  const modulesRoot = resolveLocalModulesRoot();
+  if (!modulesRoot) {
+    throw new Error("Local template enrichment needs holaboss-modules, but no local modules root was found.");
+  }
+
+  let nextWorkspaceYaml = workspaceYamlContent;
+  const nextFiles = [...files];
+  for (const [index, appId] of appIds.entries()) {
+    const appRoot = path.join(modulesRoot, appId);
+    if (!existsSync(appRoot)) {
+      throw new Error(`Local template enrichment could not find app module '${appId}' at '${appRoot}'.`);
+    }
+    const appFiles = await collectLocalTrackedFiles(appRoot);
+    const nodeModulesRoot = path.join(appRoot, "node_modules");
+    const hasLocalNodeModules = existsSync(nodeModulesRoot);
+    for (const appFile of appFiles) {
+      let nextFile = appFile;
+      if (appFile.path === "app.runtime.yaml") {
+        const loaded = parseYaml(decodeMaterializedTemplateFile(appFile));
+        const parsed = loaded && typeof loaded === "object" ? (loaded as Record<string, unknown>) : {};
+        parsed.app_id = appId;
+        if (hasLocalNodeModules && parsed.lifecycle && typeof parsed.lifecycle === "object") {
+          const lifecycle = parsed.lifecycle as Record<string, unknown>;
+          if (typeof lifecycle.setup === "string" && lifecycle.setup.trim()) {
+            lifecycle.setup = `if [ -d node_modules ]; then NODE_OPTIONS=--max-old-space-size=384 npm run build; else ${lifecycle.setup.trim()}; fi`;
+          }
+        }
+        nextFile = {
+          ...appFile,
+          content_base64: Buffer.from(stringifyYaml(parsed, { defaultStringType: "QUOTE_DOUBLE" }), "utf-8").toString("base64")
+        };
+      }
+      replaceOrAppendMaterializedTemplateFile(nextFiles, {
+        ...nextFile,
+        path: `apps/${appId}/${nextFile.path}`
+      });
+    }
+    nextWorkspaceYaml = appendApplicationToWorkspaceYaml(
+      nextWorkspaceYaml,
+      appId,
+      `apps/${appId}/app.runtime.yaml`,
+      appFiles,
+      index
+    );
+  }
+
+  replaceOrAppendMaterializedTemplateFile(nextFiles, {
+    path: "workspace.yaml",
+    content_base64: Buffer.from(`${nextWorkspaceYaml}\n`, "utf-8").toString("base64"),
+    executable: false
+  });
+  nextFiles.sort((left, right) => left.path.localeCompare(right.path));
+  return nextFiles;
+}
+
+async function copyLocalTemplateAppNodeModulesToWorkspace(templateRoot: string, workspaceId: string) {
+  if (process.env.HOLABOSS_INTERNAL_DEV?.trim() !== "1") {
+    return;
+  }
+
+  const workspaceYamlPath = path.join(templateRoot, "workspace.yaml");
+  if (!existsSync(workspaceYamlPath)) {
+    return;
+  }
+
+  const modulesRoot = resolveLocalModulesRoot();
+  if (!modulesRoot) {
+    return;
+  }
+
+  const workspaceYamlContent = await fs.readFile(workspaceYamlPath, "utf-8");
+  const appIds = readLocalTemplateAppIds(templateRoot, workspaceYamlContent);
+  if (appIds.length === 0) {
+    return;
+  }
+
+  const workspaceDir = workspaceDirectoryPath(workspaceId);
+  for (const appId of appIds) {
+    const sourceNodeModules = path.join(modulesRoot, appId, "node_modules");
+    if (!existsSync(sourceNodeModules)) {
+      continue;
+    }
+    const targetNodeModules = path.join(workspaceDir, "apps", appId, "node_modules");
+    await fs.rm(targetNodeModules, { recursive: true, force: true });
+    await fs.cp(sourceNodeModules, targetNodeModules, {
+      recursive: true,
+      dereference: false,
+      verbatimSymlinks: true
+    });
+  }
 }
 
 async function materializeLocalTemplate(payload: {
@@ -3594,7 +4049,10 @@ async function materializeLocalTemplate(payload: {
   }
 
   const metadata = await parseLocalTemplateMetadata(templateRoot);
-  const files = await collectLocalTemplateFiles(templateRoot);
+  const files = await enrichLocalTemplateWithApps(
+    templateRoot,
+    await collectLocalTrackedFiles(templateRoot)
+  );
   const totalBytes = files.reduce(
     (sum, file) => sum + Buffer.byteLength(file.content_base64, "base64"),
     0
@@ -3972,10 +4430,14 @@ async function applyMaterializedTemplateToWorkspace(
   for (const item of files) {
     const absolutePath = resolveWorkspaceMaterializedFilePath(workspaceDir, item.path);
     await fs.mkdir(path.dirname(absolutePath), { recursive: true });
-    const content = Buffer.from(item.content_base64, "base64");
-    await fs.writeFile(absolutePath, content);
-    if (item.executable) {
-      await fs.chmod(absolutePath, 0o755);
+    if (typeof item.symlink_target === "string" && item.symlink_target.trim()) {
+      await fs.symlink(item.symlink_target, absolutePath);
+    } else {
+      const content = Buffer.from(item.content_base64, "base64");
+      await fs.writeFile(absolutePath, content);
+      if (item.executable) {
+        await fs.chmod(absolutePath, 0o755);
+      }
     }
   }
 }
@@ -4468,7 +4930,7 @@ async function activateWorkspace(workspaceId: string): Promise<WorkspaceLifecycl
   const installedApps = await listInstalledAppsViaRuntime(workspaceId);
   for (const app of installedApps.apps) {
     const status = (app.build_status || "").trim().toLowerCase();
-    if (status === "running" || status === "building" || status === "pending") {
+    if (status === "running" || status === "building") {
       continue;
     }
     await startInstalledAppViaRuntime(workspaceId, app.app_id);
@@ -4901,6 +5363,9 @@ async function createWorkspace(payload: HolabossCreateWorkspacePayload): Promise
       await fs.writeFile(workspaceYamlPath, `${renderEmptyWorkspaceYaml()}\n`, "utf-8");
     } else if (materializedTemplate && resolvedTemplate) {
       await applyMaterializedTemplateToWorkspace(workspaceId, materializedTemplate.files);
+      if (templateRootPath) {
+        await copyLocalTemplateAppNodeModulesToWorkspace(templateRootPath, workspaceId);
+      }
 
       let workspaceYamlExists = true;
       try {
@@ -5715,7 +6180,7 @@ async function startEmbeddedRuntime() {
       SANDBOX_AGENT_BIND_HOST: "127.0.0.1",
       SANDBOX_AGENT_BIND_PORT: String(RUNTIME_API_PORT),
       OPENCODE_SERVER_HOST: "127.0.0.1",
-      OPENCODE_SERVER_PORT: String(RUNTIME_OPENCODE_PORT),
+      HOLABOSS_EMBEDDED_RUNTIME: "1",
       SANDBOX_AGENT_HARNESS: harness,
       HOLABOSS_RUNTIME_WORKFLOW_BACKEND: workflowBackend,
       HOLABOSS_RUNTIME_DB_PATH: runtimeDatabasePath(),
