@@ -3084,6 +3084,53 @@ function runtimeFirstNonEmptyString(
   return "";
 }
 
+function canonicalRuntimeProviderId(providerId: string): string {
+  const normalized = providerId.trim();
+  if (!normalized) {
+    return "";
+  }
+  if (
+    RUNTIME_HOLABOSS_PROVIDER_ALIASES.some(
+      (alias) => alias === normalized.toLowerCase(),
+    )
+  ) {
+    return RUNTIME_HOLABOSS_PROVIDER_ID;
+  }
+  return normalized;
+}
+
+function canonicalRuntimeModelToken(
+  providerId: string,
+  token: string,
+  modelId: string,
+): string {
+  const canonicalProviderId = canonicalRuntimeProviderId(providerId);
+  const normalizedModelId = modelId.trim();
+  const normalizedToken = token.trim();
+  if (!canonicalProviderId) {
+    return normalizedToken;
+  }
+  if (!normalizedToken) {
+    return `${canonicalProviderId}/${normalizedModelId}`;
+  }
+  if (canonicalProviderId !== RUNTIME_HOLABOSS_PROVIDER_ID) {
+    return normalizedToken;
+  }
+  if (!normalizedToken.includes("/")) {
+    return normalizedToken;
+  }
+  const [prefix, ...rest] = normalizedToken.split("/");
+  if (
+    rest.length > 0 &&
+    RUNTIME_HOLABOSS_PROVIDER_ALIASES.some(
+      (alias) => alias === prefix.trim().toLowerCase(),
+    )
+  ) {
+    return `${canonicalProviderId}/${rest.join("/").trim()}`;
+  }
+  return normalizedToken;
+}
+
 function normalizeLegacyRuntimeModelToken(token: string): string {
   return token.trim();
 }
@@ -3195,6 +3242,7 @@ function runtimeProviderModelGroups(
 
   const providers = new Map<string, { id: string; kind: string; label: string }>();
   for (const [providerId, rawProvider] of Object.entries(providersPayload)) {
+    const canonicalProviderId = canonicalRuntimeProviderId(providerId);
     const providerPayload = runtimeConfigObject(rawProvider);
     const optionsPayload = runtimeConfigObject(providerPayload.options);
     const baseUrl = runtimeFirstNonEmptyString(
@@ -3209,20 +3257,22 @@ function runtimeProviderModelGroups(
         providerPayload.type as string | undefined,
         optionsPayload.kind as string | undefined,
       ),
-      providerId,
+      canonicalProviderId,
       baseUrl,
     );
-    providers.set(providerId, {
-      id: providerId,
+    providers.set(canonicalProviderId, {
+      id: canonicalProviderId,
       kind,
-      label: runtimeProviderLabel(providerId),
+      label: runtimeProviderLabel(canonicalProviderId),
     });
   }
 
-  const runtimeDefaultProvider = runtimeFirstNonEmptyString(
-    runtimePayload.default_provider as string | undefined,
-    loadedLegacy.default_provider,
-    RUNTIME_HOLABOSS_PROVIDER_ID,
+  const runtimeDefaultProvider = canonicalRuntimeProviderId(
+    runtimeFirstNonEmptyString(
+      runtimePayload.default_provider as string | undefined,
+      loadedLegacy.default_provider,
+      RUNTIME_HOLABOSS_PROVIDER_ID,
+    ),
   );
   const legacyBaseUrl = runtimeFirstNonEmptyString(
     loadedLegacy.model_proxy_base_url,
@@ -3258,7 +3308,7 @@ function runtimeProviderModelGroups(
     return groupedModels.get(providerId)!;
   };
   const addModel = (providerId: string, token: string, modelId: string) => {
-    const normalizedProviderId = providerId.trim();
+    const normalizedProviderId = canonicalRuntimeProviderId(providerId);
     const normalizedModelId = modelId.trim();
     if (
       !normalizedProviderId ||
@@ -3267,8 +3317,11 @@ function runtimeProviderModelGroups(
     ) {
       return;
     }
-    const normalizedToken =
-      token.trim() || `${normalizedProviderId}/${normalizedModelId}`;
+    const normalizedToken = canonicalRuntimeModelToken(
+      normalizedProviderId,
+      token,
+      normalizedModelId,
+    );
     if (isDeprecatedRuntimeModelId(normalizedToken)) {
       return;
     }
@@ -3315,13 +3368,14 @@ function runtimeProviderModelGroups(
     );
     if (!providerId && token.includes("/")) {
       const [prefix, ...rest] = token.split("/");
-      if (providers.has(prefix) && rest.length > 0) {
-        providerId = prefix;
+      const normalizedPrefix = canonicalRuntimeProviderId(prefix);
+      if (providers.has(normalizedPrefix) && rest.length > 0) {
+        providerId = normalizedPrefix;
         modelId = modelId || rest.join("/");
       }
     }
     if (providerId && modelId) {
-      const normalizedProviderId = providerId.trim();
+      const normalizedProviderId = canonicalRuntimeProviderId(providerId);
       if (providers.has(normalizedProviderId)) {
         addModel(normalizedProviderId, token, modelId);
       }

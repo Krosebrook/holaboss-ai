@@ -52,7 +52,7 @@ interface BrowserAnchorBoundsPayload {
   height: number;
 }
 
-type UiSettingsPaneSection = "account" | "models" | "appearance" | "about";
+type UiSettingsPaneSection = "account" | "settings" | "about";
 
 interface BrowserStatePayload {
   id: string;

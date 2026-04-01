@@ -1,6 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { Bell, Check, ChevronRight, Clock3, Loader2, Sparkles, X } from "lucide-react";
-import { ProactiveLifecyclePanel } from "@/components/layout/ProactiveStatusCard";
+import { Bell, Check, ChevronRight, Clock3, Loader2, RefreshCcw, Sparkles, X } from "lucide-react";
 import { getWorkspaceAppDefinition, type WorkspaceInstalledAppDefinition } from "@/lib/workspaceApps";
 
 export type OperationsDrawerTab = "inbox" | "running" | "outputs";
@@ -29,40 +28,23 @@ export interface OperationsOutputEntry {
   renderer: OperationsOutputRenderer;
 }
 
-export interface OperationsRunningEntry {
-  sessionId: string;
-  title: string;
-  detail: string;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-  isActive: boolean;
-}
-
 interface OperationsDrawerProps {
   activeTab: OperationsDrawerTab;
   onTabChange: (tab: OperationsDrawerTab) => void;
   proposals: TaskProposalRecordPayload[];
   isLoadingProposals: boolean;
-  proactiveStatus: ProactiveAgentStatusPayload | null;
-  isLoadingProactiveStatus: boolean;
-  workspaceSetupStatus: ProactiveStatusSnapshotPayload | null;
-  workspaceName?: string | null;
-  workspaceId?: string | null;
   isTriggeringProposal: boolean;
   proposalStatusMessage: string;
   proposalAction: {
     proposalId: string;
     action: "accept" | "dismiss";
   } | null;
-  runningEntries: OperationsRunningEntry[];
-  isLoadingRunningEntries: boolean;
   outputs: OperationsOutputEntry[];
   installedApps: WorkspaceInstalledAppDefinition[];
   selectedOutputId: string | null;
   onSelectOutput: (outputId: string) => void;
-  onOpenRunningSession: (sessionId: string) => void;
   onOpenOutput: (entry: OperationsOutputEntry) => void;
+  onRefreshProposals: () => void;
   onTriggerProposal: () => void;
   onAcceptProposal: (proposal: TaskProposalRecordPayload) => void;
   onDismissProposal: (proposal: TaskProposalRecordPayload) => void;
@@ -74,22 +56,15 @@ export function OperationsDrawer({
   onTabChange,
   proposals,
   isLoadingProposals,
-  proactiveStatus,
-  isLoadingProactiveStatus,
-  workspaceSetupStatus,
-  workspaceName,
-  workspaceId,
   isTriggeringProposal,
   proposalStatusMessage,
   proposalAction,
-  runningEntries,
-  isLoadingRunningEntries,
   outputs,
   installedApps,
   selectedOutputId,
   onSelectOutput,
-  onOpenRunningSession,
   onOpenOutput,
+  onRefreshProposals,
   onTriggerProposal,
   onAcceptProposal,
   onDismissProposal,
@@ -103,9 +78,9 @@ export function OperationsDrawer({
   }, [outputs, selectedOutputId]);
 
   return (
-    <aside className="theme-shell soft-vignette neon-border relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[var(--theme-radius-card)] shadow-card">
-      <header className="theme-header-surface flex shrink-0 items-center gap-2 border-b border-neon-green/15 px-3 py-3 pr-14">
-        <div className="grid min-w-0 flex-1 grid-cols-3 gap-1.5">
+    <aside className="theme-shell soft-vignette neon-border relative flex h-full min-h-0 min-w-[360px] max-w-[420px] flex-col overflow-hidden rounded-[var(--radius-xl)] shadow-lg">
+      <header className="theme-header-surface flex shrink-0 items-center justify-between gap-3 border-b border-primary/15 px-4 py-3">
+        <div className="flex items-center gap-2">
           <DrawerTabButton active={activeTab === "inbox"} icon={<Bell size={14} />} label="Inbox" onClick={() => onTabChange("inbox")} />
           <DrawerTabButton
             active={activeTab === "running"}
@@ -127,29 +102,18 @@ export function OperationsDrawer({
           <InboxPanel
             proposals={proposals}
             isLoadingProposals={isLoadingProposals}
-            proactiveStatus={proactiveStatus}
-            isLoadingProactiveStatus={isLoadingProactiveStatus}
-            workspaceSetupStatus={workspaceSetupStatus}
-            workspaceName={workspaceName}
-            workspaceId={workspaceId}
             isTriggeringProposal={isTriggeringProposal}
             proposalStatusMessage={proposalStatusMessage}
             proposalAction={proposalAction}
             hasWorkspace={hasWorkspace}
+            onRefreshProposals={onRefreshProposals}
             onTriggerProposal={onTriggerProposal}
             onAcceptProposal={onAcceptProposal}
             onDismissProposal={onDismissProposal}
           />
         ) : null}
 
-        {activeTab === "running" ? (
-          <RunningPanel
-            hasWorkspace={hasWorkspace}
-            entries={runningEntries}
-            isLoading={isLoadingRunningEntries}
-            onOpenSession={onOpenRunningSession}
-          />
-        ) : null}
+        {activeTab === "running" ? <RunningPanel /> : null}
 
         {activeTab === "outputs" ? (
           <OutputsPanel
@@ -180,14 +144,14 @@ function DrawerTabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-[14px] border px-2.5 text-[11px] transition ${
+      className={`inline-flex h-10 items-center gap-2 rounded-[16px] border px-3 text-[12px] transition ${
         active
-          ? "border-neon-green/45 bg-neon-green/10 text-neon-green"
-          : "border-panel-border/45 text-text-muted hover:border-neon-green/35 hover:text-text-main"
+          ? "border-primary/45 bg-primary/10 text-primary"
+          : "border-border/45 text-muted-foreground hover:border-primary/35 hover:text-foreground"
       }`}
     >
       {icon}
-      <span className="truncate">{label}</span>
+      <span>{label}</span>
     </button>
   );
 }
@@ -195,26 +159,17 @@ function DrawerTabButton({
 function InboxPanel({
   proposals,
   isLoadingProposals,
-  proactiveStatus,
-  isLoadingProactiveStatus,
-  workspaceSetupStatus,
-  workspaceName,
-  workspaceId,
   isTriggeringProposal,
   proposalStatusMessage,
   proposalAction,
   hasWorkspace,
+  onRefreshProposals,
   onTriggerProposal,
   onAcceptProposal,
   onDismissProposal
 }: {
   proposals: TaskProposalRecordPayload[];
   isLoadingProposals: boolean;
-  proactiveStatus: ProactiveAgentStatusPayload | null;
-  isLoadingProactiveStatus: boolean;
-  workspaceSetupStatus: ProactiveStatusSnapshotPayload | null;
-  workspaceName?: string | null;
-  workspaceId?: string | null;
   isTriggeringProposal: boolean;
   proposalStatusMessage: string;
   proposalAction: {
@@ -222,30 +177,45 @@ function InboxPanel({
     action: "accept" | "dismiss";
   } | null;
   hasWorkspace: boolean;
+  onRefreshProposals: () => void;
   onTriggerProposal: () => void;
   onAcceptProposal: (proposal: TaskProposalRecordPayload) => void;
   onDismissProposal: (proposal: TaskProposalRecordPayload) => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-panel-border/35 px-4 py-4">
+      <div className="shrink-0 border-b border-border/35 px-4 py-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[10px] uppercase tracking-[0.16em] text-neon-green/76">Remote proposals</div>
+            <div className="text-[10px] uppercase tracking-[0.16em] text-primary/76">Remote proposals</div>
+            <div className="mt-1 text-[12px] leading-6 text-foreground/88">
+              Review backend-delivered task ideas and either queue them immediately or dismiss them at the source.
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={onTriggerProposal}
-            disabled={!hasWorkspace || isTriggeringProposal}
-            className="inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-[14px] border border-neon-green/40 bg-neon-green/10 px-3 text-[11px] text-neon-green transition hover:bg-neon-green/14 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isTriggeringProposal ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-            <span>Trigger</span>
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={onRefreshProposals}
+              disabled={!hasWorkspace || isLoadingProposals}
+              className="inline-flex h-8 items-center justify-center gap-2 rounded-[14px] border border-border/45 px-3 text-[11px] text-muted-foreground transition hover:border-primary/35 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isLoadingProposals ? <Loader2 size={12} className="animate-spin" /> : <RefreshCcw size={12} />}
+              <span>Refresh</span>
+            </button>
+            <button
+              type="button"
+              onClick={onTriggerProposal}
+              disabled={!hasWorkspace || isTriggeringProposal}
+              className="inline-flex h-8 items-center justify-center gap-2 rounded-[14px] border border-primary/40 bg-primary/10 px-3 text-[11px] text-primary transition hover:bg-primary/14 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isTriggeringProposal ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+              <span>Trigger</span>
+            </button>
+          </div>
         </div>
 
         {proposalStatusMessage ? (
-          <div className="theme-subtle-surface mt-3 rounded-[14px] border border-panel-border/35 px-3 py-2 text-[11px] text-text-muted">
+          <div className="theme-subtle-surface mt-3 rounded-[14px] border border-border/35 px-3 py-2 text-[11px] text-muted-foreground">
             {proposalStatusMessage}
           </div>
         ) : null}
@@ -254,64 +224,49 @@ function InboxPanel({
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {!hasWorkspace ? (
           <EmptyNotice message="Select a workspace to review incoming task proposals." />
+        ) : proposals.length === 0 ? (
+          <EmptyNotice message={isLoadingProposals ? "Loading task proposals..." : "No unreviewed proposals for this workspace yet."} />
         ) : (
           <div className="grid gap-3">
-            <ProactiveLifecyclePanel
-              compact
-              hasWorkspace={hasWorkspace}
-              workspaceName={workspaceName}
-              workspaceId={workspaceId}
-              proactiveStatus={proactiveStatus}
-              isLoading={isLoadingProposals || isLoadingProactiveStatus}
-              workspaceSetup={workspaceSetupStatus}
-            />
-
-            {proposals.length === 0 ? (
-              <EmptyNotice
-                message={emptyProposalMessage({
-                  isLoadingProposals,
-                  isLoadingProactiveStatus,
-                  proactiveStatus,
-                  workspaceSetupStatus
-                })}
-              />
-            ) : (
-              proposals.map((proposal) => {
-                const isActing = proposalAction?.proposalId === proposal.proposal_id;
-                const previewPrompt = truncateWordPreview(proposal.task_prompt, 24);
-                return (
-                  <article key={proposal.proposal_id} className="theme-subtle-surface rounded-[18px] border border-panel-border/35 px-4 py-4">
-                    <div className="min-w-0">
-                      <div className="text-[12px] font-medium text-text-main">{proposal.task_name}</div>
-                      <div className="mt-2 text-[11px] leading-6 text-text-muted">{previewPrompt}</div>
+            {proposals.map((proposal) => {
+              const isActing = proposalAction?.proposalId === proposal.proposal_id;
+              return (
+                <article key={proposal.proposal_id} className="theme-subtle-surface rounded-[18px] border border-border/35 px-4 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12px] font-medium text-foreground">{proposal.task_name}</div>
+                      <div className="mt-2 whitespace-pre-wrap text-[11px] leading-6 text-muted-foreground">{proposal.task_prompt}</div>
                     </div>
-
-                    <div className="mt-3 text-[10px] text-text-dim/78">{formatTimestamp(proposal.created_at)}</div>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onAcceptProposal(proposal)}
-                        disabled={isActing}
-                        className="inline-flex h-9 items-center justify-center gap-2 rounded-[14px] border border-neon-green/40 bg-neon-green/10 px-3 text-[11px] text-neon-green transition hover:bg-neon-green/14 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isActing && proposalAction?.action === "accept" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                        <span>Accept</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDismissProposal(proposal)}
-                        disabled={isActing}
-                        className="inline-flex h-9 items-center justify-center gap-2 rounded-[14px] border border-panel-border/45 px-3 text-[11px] text-text-muted transition hover:border-[rgba(255,153,102,0.3)] hover:text-[rgba(255,212,189,0.92)] disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isActing && proposalAction?.action === "dismiss" ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
-                        <span>Dismiss</span>
-                      </button>
+                    <div className="shrink-0 rounded-full border border-border/45 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                      {proposal.state}
                     </div>
-                  </article>
-                );
-              })
-            )}
+                  </div>
+
+                  <div className="mt-3 text-[10px] text-muted-foreground/78">{formatTimestamp(proposal.created_at)}</div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onAcceptProposal(proposal)}
+                      disabled={isActing}
+                      className="inline-flex h-9 items-center justify-center gap-2 rounded-[14px] border border-primary/40 bg-primary/10 px-3 text-[11px] text-primary transition hover:bg-primary/14 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isActing && proposalAction?.action === "accept" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                      <span>Accept</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDismissProposal(proposal)}
+                      disabled={isActing}
+                      className="inline-flex h-9 items-center justify-center gap-2 rounded-[14px] border border-border/45 px-3 text-[11px] text-muted-foreground transition hover:border-[rgba(255,153,102,0.3)] hover:text-[rgba(255,212,189,0.92)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isActing && proposalAction?.action === "dismiss" ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+                      <span>Dismiss</span>
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </div>
@@ -319,109 +274,14 @@ function InboxPanel({
   );
 }
 
-function emptyProposalMessage(params: {
-  isLoadingProposals: boolean;
-  isLoadingProactiveStatus: boolean;
-  proactiveStatus: ProactiveAgentStatusPayload | null;
-  workspaceSetupStatus: ProactiveStatusSnapshotPayload | null;
-}) {
-  const { isLoadingProposals, isLoadingProactiveStatus, proactiveStatus, workspaceSetupStatus } = params;
-  if (isLoadingProposals || isLoadingProactiveStatus) {
-    return "Checking the proactive inbox for fresh task proposals...";
-  }
-  if (workspaceSetupStatus?.state === "setting_up") {
-    return "Workspace setup is still in progress. Proposals can land once the proactive agent has enough context.";
-  }
-  if (workspaceSetupStatus?.state === "error") {
-    return workspaceSetupStatus.detail || "Workspace setup failed before proactive delivery completed.";
-  }
-  if (proactiveStatus?.delivery_state === "analyzing") {
-    return "Remote proactive analysis is still running for this workspace.";
-  }
-  if (proactiveStatus?.delivery_state === "blocked") {
-    return "Proactive delivery is currently blocked. Check the lifecycle panel above.";
-  }
-  if (proactiveStatus?.delivery_state === "no_proposal") {
-    return "The latest proactive heartbeat did not produce a task proposal.";
-  }
-  if (proactiveStatus?.delivery_state === "inactive") {
-    return "Proactive delivery is inactive for this workspace right now.";
-  }
-  return "No unreviewed proposals for this workspace yet.";
-}
-
-function RunningPanel({
-  hasWorkspace,
-  entries,
-  isLoading,
-  onOpenSession
-}: {
-  hasWorkspace: boolean;
-  entries: OperationsRunningEntry[];
-  isLoading: boolean;
-  onOpenSession: (sessionId: string) => void;
-}) {
-  if (!hasWorkspace) {
-    return (
-      <div className="flex items-center justify-center p-6">
-        <EmptyNotice message="Select a workspace to inspect running child sessions." />
-      </div>
-    );
-  }
-
-  if (entries.length === 0) {
-    return (
-      <div className="flex items-center justify-center p-6">
-        <EmptyNotice message={isLoading ? "Loading running sessions..." : "No proposal child sessions yet. Accept a proposal to create one here."} />
-      </div>
-    );
-  }
-
+function RunningPanel() {
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]">
-      <div className="shrink-0 border-b border-panel-border/35 px-4 py-4">
-        <div className="text-[10px] uppercase tracking-[0.16em] text-neon-green/76">Running sessions</div>
-        <div className="mt-1 text-[12px] leading-6 text-text-main/88">
-          Proposal-created child sessions live here. Open one to replace the current chat pane, then jump back to main when you are done.
-        </div>
-      </div>
-
-      <div className="min-h-0 overflow-y-auto px-4 py-4">
-        <div className="grid gap-3">
-          {entries.map((entry) => (
-            <article
-              key={entry.sessionId}
-              className={`rounded-[18px] border px-4 py-4 ${
-                entry.isActive
-                  ? "border-neon-green/38 bg-neon-green/10"
-                  : "theme-subtle-surface border-panel-border/35"
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12px] font-medium text-text-main">{entry.title}</div>
-                  <div className="mt-2 text-[11px] leading-6 text-text-muted">{entry.detail}</div>
-                </div>
-                <div className={`shrink-0 rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.12em] ${runningStatusClasses(entry.status)}`}>
-                  {runningStatusLabel(entry.status)}
-                </div>
-              </div>
-
-              <div className="mt-3 text-[10px] text-text-dim/78">Updated {formatTimestamp(entry.updatedAt)}</div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => onOpenSession(entry.sessionId)}
-                  disabled={entry.isActive}
-                  className="inline-flex h-9 items-center justify-center gap-2 rounded-[14px] border border-neon-green/40 bg-neon-green/10 px-3 text-[11px] text-neon-green transition hover:bg-neon-green/14 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ChevronRight size={12} />
-                  <span>{entry.isActive ? "Currently open" : "Open session"}</span>
-                </button>
-              </div>
-            </article>
-          ))}
+    <div className="flex h-full items-center justify-center p-6">
+      <div className="theme-subtle-surface max-w-[260px] rounded-[20px] border border-border/35 px-5 py-5 text-center">
+        <div className="text-[11px] uppercase tracking-[0.16em] text-primary/76">Running</div>
+        <div className="mt-2 text-[15px] font-medium text-foreground">Execution stream coming next</div>
+        <div className="mt-2 text-[12px] leading-6 text-muted-foreground/82">
+          This panel is reserved for active runs. For now it stays as a placeholder while Inbox and Outputs take over the right rail.
         </div>
       </div>
     </div>
@@ -443,9 +303,9 @@ function OutputsPanel({
 }) {
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]">
-      <div className="shrink-0 border-b border-panel-border/35 px-4 py-4">
-        <div className="text-[10px] uppercase tracking-[0.16em] text-neon-green/76">Outputs</div>
-        <div className="mt-1 text-[12px] leading-6 text-text-main/88">
+      <div className="shrink-0 border-b border-border/35 px-4 py-4">
+        <div className="text-[10px] uppercase tracking-[0.16em] text-primary/76">Outputs</div>
+        <div className="mt-1 text-[12px] leading-6 text-foreground/88">
           Latest operator-side events from the desktop surface, including proposal actions and workflow handoffs.
         </div>
       </div>
@@ -456,7 +316,7 @@ function OutputsPanel({
         </div>
       ) : (
         <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
-          <div className="shrink-0 border-b border-panel-border/35 px-3 py-3">
+          <div className="shrink-0 border-b border-border/35 px-3 py-3">
             <div className="flex gap-2 overflow-x-auto pb-1">
               {outputs.map((entry) => (
                 <button
@@ -466,11 +326,11 @@ function OutputsPanel({
                   className={`min-w-[120px] rounded-[14px] border px-3 py-2 text-left transition ${
                     selectedOutput?.id === entry.id
                       ? outputToneClasses(entry.tone, true)
-                      : "theme-subtle-surface border-panel-border/35 text-text-main/86 hover:border-neon-green/30"
+                      : "theme-subtle-surface border-border/35 text-foreground/86 hover:border-primary/30"
                   }`}
                 >
                   <div className="truncate text-[11px] font-medium">{entry.title}</div>
-                  <div className="mt-1 text-[10px] text-text-dim/78">{formatTimestamp(entry.createdAt)}</div>
+                  <div className="mt-1 text-[10px] text-muted-foreground/78">{formatTimestamp(entry.createdAt)}</div>
                 </button>
               ))}
             </div>
@@ -479,22 +339,22 @@ function OutputsPanel({
           <div className="min-h-0 overflow-y-auto p-4">
             {selectedOutput ? (
               <article className={`rounded-[20px] border px-4 py-4 ${outputToneClasses(selectedOutput.tone, false)}`}>
-                <div className="text-[10px] uppercase tracking-[0.16em] text-text-dim/75">
+                <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground/75">
                   {selectedOutput.renderer.type === "app" ? "Workspace app output" : "Internal output"}
                 </div>
-                <div className="mt-2 text-[16px] font-medium text-text-main">{selectedOutput.title}</div>
-                <div className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-text-main/86">{selectedOutput.detail}</div>
+                <div className="mt-2 text-[16px] font-medium text-foreground">{selectedOutput.title}</div>
+                <div className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-foreground/86">{selectedOutput.detail}</div>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => onOpenOutput(selectedOutput)}
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-[14px] border border-neon-green/40 bg-neon-green/10 px-3 text-[11px] text-neon-green transition hover:bg-neon-green/14"
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-[14px] border border-primary/40 bg-primary/10 px-3 text-[11px] text-primary transition hover:bg-primary/14"
                   >
                     <ChevronRight size={12} />
                     <span>{openOutputLabel(selectedOutput, installedApps)}</span>
                   </button>
                 </div>
-                <div className="mt-4 text-[10px] text-text-dim/78">{formatTimestamp(selectedOutput.createdAt)}</div>
+                <div className="mt-4 text-[10px] text-muted-foreground/78">{formatTimestamp(selectedOutput.createdAt)}</div>
               </article>
             ) : null}
           </div>
@@ -524,22 +384,10 @@ function openOutputLabel(entry: OperationsOutputEntry, installedApps: WorkspaceI
 
 function EmptyNotice({ message }: { message: string }) {
   return (
-    <div className="theme-subtle-surface rounded-[18px] border border-panel-border/35 px-4 py-5 text-[12px] leading-6 text-text-dim/78">
+    <div className="theme-subtle-surface rounded-[18px] border border-border/35 px-4 py-5 text-[12px] leading-6 text-muted-foreground/78">
       {message}
     </div>
   );
-}
-
-function truncateWordPreview(value: string, wordLimit: number): string {
-  const normalized = value.trim().replace(/\s+/g, " ");
-  if (!normalized) {
-    return "";
-  }
-  const words = normalized.split(" ");
-  if (words.length <= wordLimit) {
-    return normalized;
-  }
-  return `${words.slice(0, wordLimit).join(" ")}...`;
 }
 
 function formatTimestamp(value: string): string {
@@ -553,8 +401,8 @@ function formatTimestamp(value: string): string {
 function outputToneClasses(tone: OperationsOutputEntry["tone"], compact: boolean): string {
   if (tone === "success") {
     return compact
-      ? "border-neon-green/40 bg-neon-green/10 text-neon-green"
-      : "border-neon-green/30 bg-neon-green/10";
+      ? "border-primary/40 bg-primary/10 text-primary"
+      : "border-primary/30 bg-primary/10";
   }
   if (tone === "error") {
     return compact
@@ -562,40 +410,6 @@ function outputToneClasses(tone: OperationsOutputEntry["tone"], compact: boolean
       : "border-[rgba(255,153,102,0.24)] bg-[rgba(255,153,102,0.08)]";
   }
   return compact
-    ? "border-panel-border/45 bg-[var(--theme-subtle-bg)] text-text-main/88"
-    : "border-panel-border/35 bg-[var(--theme-subtle-bg)]";
-}
-
-function runningStatusLabel(status: string): string {
-  const normalized = status.trim().toUpperCase();
-  if (normalized === "BUSY") {
-    return "Running";
-  }
-  if (normalized === "QUEUED") {
-    return "Queued";
-  }
-  if (normalized === "WAITING_USER") {
-    return "Waiting";
-  }
-  if (normalized === "ERROR") {
-    return "Error";
-  }
-  return "Idle";
-}
-
-function runningStatusClasses(status: string): string {
-  const normalized = status.trim().toUpperCase();
-  if (normalized === "BUSY") {
-    return "border-neon-green/35 bg-neon-green/10 text-neon-green";
-  }
-  if (normalized === "QUEUED") {
-    return "border-[rgba(120,210,255,0.28)] bg-[rgba(120,210,255,0.08)] text-[rgba(181,235,255,0.96)]";
-  }
-  if (normalized === "WAITING_USER") {
-    return "border-[rgba(255,210,120,0.28)] bg-[rgba(255,210,120,0.08)] text-[rgba(255,232,181,0.96)]";
-  }
-  if (normalized === "ERROR") {
-    return "border-[rgba(255,153,102,0.28)] bg-[rgba(255,153,102,0.08)] text-[rgba(255,212,189,0.96)]";
-  }
-  return "border-panel-border/45 bg-[var(--theme-subtle-bg)] text-text-main/88";
+    ? "border-border/45 bg-muted text-foreground/88"
+    : "border-border/35 bg-muted";
 }

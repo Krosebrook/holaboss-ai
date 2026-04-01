@@ -5,8 +5,7 @@ import {
 import {
   OperationsDrawer,
   type OperationsDrawerTab,
-  type OperationsRunningEntry,
-  type OperationsOutputEntry
+  type OperationsOutputEntry,
 } from "@/components/layout/OperationsDrawer";
 import { appShellMainGridClassName } from "@/components/layout/appShellLayout";
 import { SettingsDialog } from "@/components/layout/SettingsDialog";
@@ -18,12 +17,7 @@ import { MarketplaceGallery } from "@/components/marketplace/MarketplaceGallery"
 import { AppSurfacePane } from "@/components/panes/AppSurfacePane";
 import { AutomationsPane } from "@/components/panes/AutomationsPane";
 import { BrowserPane } from "@/components/panes/BrowserPane";
-import {
-  ChatPane,
-  type ManagedChatSessionObservedPayload,
-  type ManagedChatSessionRuntime,
-  type ManagedQueueSessionInputPayload
-} from "@/components/panes/ChatPane";
+import { ChatPane } from "@/components/panes/ChatPane";
 import { FileExplorerPane } from "@/components/panes/FileExplorerPane";
 import { IntegrationsPane } from "@/components/panes/IntegrationsPane";
 import { InternalSurfacePane } from "@/components/panes/InternalSurfacePane";
@@ -73,13 +67,26 @@ const OPERATIONS_DRAWER_TAB_STORAGE_KEY = "holaboss-operations-drawer-tab-v1";
 const FILES_PANE_WIDTH_STORAGE_KEY = "holaboss-files-pane-width-v1";
 const BROWSER_PANE_WIDTH_STORAGE_KEY = "holaboss-browser-pane-width-v1";
 const SPACE_VISIBILITY_STORAGE_KEY = "holaboss-space-visibility-v1";
-const THEMES = ["holaboss", "emerald", "cobalt", "ember", "glacier", "mono", "claude", "slate", "paper", "graphite"] as const;
-const MIN_FILES_PANE_WIDTH = 168;
-const MIN_BROWSER_PANE_WIDTH = 200;
+const THEMES = [
+  "amber-minimal-dark",
+  "amber-minimal-light",
+  "cosmic-night-dark",
+  "cosmic-night-light",
+  "claude-dark",
+  "claude-light",
+  "clean-slate-dark",
+  "clean-slate-light",
+  "bold-tech-dark",
+  "bold-tech-light",
+  "catppuccin-dark",
+  "catppuccin-light",
+  "bubblegum-dark",
+  "bubblegum-light",
+] as const;
+const MIN_UTILITY_PANE_WIDTH = 200;
 const MAX_UTILITY_PANE_WIDTH = 720;
 const LEGACY_DEFAULT_FILES_PANE_WIDTH = 420;
-const PREVIOUS_DEFAULT_FILES_PANE_WIDTH = 200;
-const DEFAULT_FILES_PANE_WIDTH = 176;
+const DEFAULT_FILES_PANE_WIDTH = MIN_UTILITY_PANE_WIDTH;
 const DEFAULT_BROWSER_PANE_WIDTH = 460;
 const MIN_AGENT_CONTENT_WIDTH = 120;
 const UTILITY_PANE_RESIZER_WIDTH = 16;
@@ -120,7 +127,7 @@ function isAppTheme(value: string): value is AppTheme {
 }
 
 function isSettingsPaneSection(value: string): value is UiSettingsPaneSection {
-  return value === "account" || value === "models" || value === "appearance" || value === "about";
+  return value === "account" || value === "providers" || value === "settings" || value === "about";
 }
 
 type AgentView =
@@ -138,103 +145,8 @@ type AgentView =
       htmlContent?: string | null;
     };
 
-type ManagedSessionRuntimeState = ManagedChatSessionRuntime & {
-  streamId: string | null;
-};
-
-function managedSessionKey(workspaceId: string, sessionId: string) {
-  return `${workspaceId}:${sessionId}`;
-}
-
-function normalizeRuntimeStatus(value: string | null | undefined) {
-  return (value || "").trim().toUpperCase();
-}
-
-function runtimeErrorDetail(value: unknown) {
-  if (typeof value === "string" && value.trim()) {
-    return value.trim();
-  }
-  if (value && typeof value === "object") {
-    const payload = value as Record<string, unknown>;
-    if (typeof payload.message === "string" && payload.message.trim()) {
-      return payload.message.trim();
-    }
-    if (typeof payload.error === "string" && payload.error.trim()) {
-      return payload.error.trim();
-    }
-  }
-  return "";
-}
-
-function normalizeSessionOutputEvent(
-  payload: HolabossSessionStreamEventPayload
-): SessionOutputEventPayload | null {
-  if (payload.type !== "event" || !payload.event || !payload.event.data || typeof payload.event.data !== "object") {
-    return null;
-  }
-  const data = payload.event.data as Record<string, unknown>;
-  const workspaceId = typeof data.workspace_id === "string" ? data.workspace_id.trim() : "";
-  const sessionId = typeof data.session_id === "string" ? data.session_id.trim() : "";
-  const inputId = typeof data.input_id === "string" ? data.input_id.trim() : "";
-  const eventType = typeof data.event_type === "string" ? data.event_type.trim() : "";
-  const sequence = typeof data.sequence === "number" && Number.isFinite(data.sequence) ? data.sequence : 0;
-  const eventId =
-    typeof data.id === "number" && Number.isFinite(data.id)
-      ? data.id
-      : typeof payload.event.id === "string" && /^\d+$/.test(payload.event.id.trim())
-        ? Number.parseInt(payload.event.id, 10)
-      : Number.NaN;
-  const createdAt =
-    typeof data.created_at === "string" && data.created_at.trim()
-      ? data.created_at.trim()
-      : typeof data.timestamp === "string" && data.timestamp.trim()
-        ? data.timestamp.trim()
-        : new Date().toISOString();
-  if (!sessionId || !eventType || !Number.isFinite(eventId)) {
-    return null;
-  }
-  return {
-    id: eventId,
-    workspace_id: workspaceId,
-    session_id: sessionId,
-    input_id: inputId,
-    sequence,
-    event_type: eventType,
-    payload:
-      data.payload && typeof data.payload === "object" && !Array.isArray(data.payload)
-        ? (data.payload as Record<string, unknown>)
-        : {},
-    created_at: createdAt
-  };
-}
-
-function mergeSessionOutputEvents(
-  existing: SessionOutputEventPayload[],
-  incoming: SessionOutputEventPayload[]
-): SessionOutputEventPayload[] {
-  if (incoming.length === 0) {
-    return existing;
-  }
-  const byId = new Map<number, SessionOutputEventPayload>();
-  for (const event of existing) {
-    byId.set(event.id, event);
-  }
-  for (const event of incoming) {
-    byId.set(event.id, event);
-  }
-  return Array.from(byId.values()).sort((left, right) => left.sequence - right.sequence || left.id - right.id);
-}
-
 function loadSpaceVisibility(): SpaceVisibilityState {
   return DEFAULT_SPACE_VISIBILITY;
-}
-
-function minUtilityPaneWidth(paneId: UtilityPaneId): number {
-  return paneId === "files" ? MIN_FILES_PANE_WIDTH : MIN_BROWSER_PANE_WIDTH;
-}
-
-function clampStoredUtilityPaneWidth(paneId: UtilityPaneId, width: number): number {
-  return Math.max(minUtilityPaneWidth(paneId), Math.min(width, MAX_UTILITY_PANE_WIDTH));
 }
 
 function loadFilesPaneWidth(): number {
@@ -242,10 +154,13 @@ function loadFilesPaneWidth(): number {
     const raw = localStorage.getItem(FILES_PANE_WIDTH_STORAGE_KEY);
     const parsed = Number(raw);
     if (Number.isFinite(parsed)) {
-      if (parsed === LEGACY_DEFAULT_FILES_PANE_WIDTH || parsed === PREVIOUS_DEFAULT_FILES_PANE_WIDTH) {
+      if (parsed === LEGACY_DEFAULT_FILES_PANE_WIDTH) {
         return DEFAULT_FILES_PANE_WIDTH;
       }
-      return clampStoredUtilityPaneWidth("files", parsed);
+      return Math.max(
+        MIN_UTILITY_PANE_WIDTH,
+        Math.min(parsed, MAX_UTILITY_PANE_WIDTH),
+      );
     }
   } catch {
     // ignore
@@ -259,7 +174,10 @@ function loadBrowserPaneWidth(): number {
     const raw = localStorage.getItem(BROWSER_PANE_WIDTH_STORAGE_KEY);
     const parsed = Number(raw);
     if (Number.isFinite(parsed)) {
-      return clampStoredUtilityPaneWidth("browser", parsed);
+      return Math.max(
+        MIN_UTILITY_PANE_WIDTH,
+        Math.min(parsed, MAX_UTILITY_PANE_WIDTH),
+      );
     }
   } catch {
     // ignore
@@ -304,7 +222,7 @@ function loadTheme(): AppTheme {
     // ignore
   }
 
-  return "holaboss";
+  return "amber-minimal-dark";
 }
 
 function spaceComponentLabel(componentId: SpaceComponentId) {
@@ -347,13 +265,7 @@ function spaceResizeHandleSpec(
 }
 
 function normalizeErrorMessage(error: unknown) {
-  const message =
-    error instanceof Error ? error.message : typeof error === "string" && error.trim() ? error : "Request failed.";
-  const normalized = message.trim().toLowerCase();
-  if (normalized === "aborted" || normalized.includes("stream aborted") || normalized.includes("aborterror")) {
-    return "App is still starting up. Try again in a moment.";
-  }
-  return message;
+  return error instanceof Error ? error.message : "Request failed.";
 }
 
 function inferInternalSurfaceFromOutputType(
@@ -443,7 +355,7 @@ function OnboardingUserButton() {
           height: rect.height,
         });
       }}
-      className="grid h-9 w-9 shrink-0 place-items-center rounded-[14px] border border-panel-border/45 text-text-muted transition-colors hover:bg-[var(--theme-hover-bg)] hover:text-text-main"
+      className="grid h-9 w-9 shrink-0 place-items-center rounded-[14px] border border-border/45 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
       <User2 size={14} />
     </button>
@@ -563,18 +475,18 @@ function FirstWorkspacePane() {
           <OnboardingUserButton />
         </div>
         <div className="w-full max-w-[1080px]">
-          <div className="theme-shell flex w-full flex-col items-center rounded-[var(--theme-radius-card)] border border-panel-border/45 px-6 py-12 shadow-card sm:px-8 lg:px-10">
-            <Loader2 size={20} className="animate-spin text-text-dim/60" />
-            <h2 className="mt-5 text-[17px] font-medium tracking-[-0.01em] text-text-main">
+          <div className="theme-shell flex w-full flex-col items-center rounded-[var(--radius-xl)] border border-border/45 px-6 py-12 shadow-lg sm:px-8 lg:px-10">
+            <Loader2 size={20} className="animate-spin text-muted-foreground/60" />
+            <h2 className="mt-5 text-[17px] font-medium tracking-[-0.01em] text-foreground">
               {createTitle}
             </h2>
-            <p className="mt-2 max-w-sm text-center text-[13px] leading-6 text-text-muted/70">
+            <p className="mt-2 max-w-sm text-center text-[13px] leading-6 text-muted-foreground/70">
               {createDetail}
             </p>
-            <div className="mt-6 flex items-center gap-6 text-[11px] text-text-dim/60">
+            <div className="mt-6 flex items-center gap-6 text-[11px] text-muted-foreground/60">
               {createSteps.map((step, i) => (
                 <div key={step} className="flex items-center gap-2">
-                  <span className={`inline-block h-1 w-1 rounded-full ${i === 0 ? "bg-text-main/50" : "bg-text-dim/30"}`} />
+                  <span className={`inline-block h-1 w-1 rounded-full ${i === 0 ? "bg-foreground/50" : "bg-muted-foreground/30"}`} />
                   <span>{step}</span>
                 </div>
               ))}
@@ -625,7 +537,7 @@ function FirstWorkspacePane() {
         <OnboardingUserButton />
       </div>
       <div className="w-full max-w-[1080px]">
-        <div className="theme-shell w-full rounded-[var(--theme-radius-card)] border border-panel-border/45 px-6 py-6 shadow-card sm:px-8 sm:py-7 lg:px-10 lg:py-8">
+        <div className="theme-shell w-full rounded-[var(--radius-xl)] border border-border/45 px-6 py-6 shadow-lg sm:px-8 sm:py-7 lg:px-10 lg:py-8">
           {onboardingStep === "gallery" ? (
             <MarketplaceGallery
               mode="pick"
@@ -651,26 +563,26 @@ function FirstWorkspacePane() {
           ) : onboardingStep === "configure" ? (
             <div>
               <div className="max-w-3xl">
-                <div className="text-[11px] uppercase tracking-[0.24em] text-text-dim/78">
+                <div className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground/78">
                   New workspace
                 </div>
-                <h1 className="mt-3 text-[28px] font-semibold tracking-[-0.04em] text-text-main sm:text-[34px]">
+                <h1 className="mt-3 text-[28px] font-semibold tracking-[-0.04em] text-foreground sm:text-[34px]">
                   Configure &amp; launch
                 </h1>
               </div>
 
               {templateSourceMode === "marketplace" &&
               selectedMarketplaceTemplate ? (
-                <div className="mt-5 flex items-center gap-3 rounded-[18px] border border-panel-border/35 bg-[var(--theme-subtle-bg)] px-4 py-3">
+                <div className="mt-5 flex items-center gap-3 rounded-[18px] border border-border/35 bg-muted px-4 py-3">
                   <KitEmoji
                     emoji={selectedMarketplaceTemplate.emoji}
                     size={32}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[14px] font-medium text-text-main">
+                    <div className="truncate text-[14px] font-medium text-foreground">
                       {selectedMarketplaceTemplate.name}
                     </div>
-                    <div className="truncate text-[12px] text-text-muted/72">
+                    <div className="truncate text-[12px] text-muted-foreground/72">
                       {selectedMarketplaceTemplate.description ||
                         selectedMarketplaceTemplate.apps.join(", ")}
                     </div>
@@ -678,46 +590,46 @@ function FirstWorkspacePane() {
                   <button
                     type="button"
                     onClick={() => setOnboardingStep("gallery")}
-                    className="shrink-0 text-[12px] text-text-muted/72 underline transition-colors hover:text-text-main"
+                    className="shrink-0 text-[12px] text-muted-foreground/72 underline transition-colors hover:text-foreground"
                   >
                     Change
                   </button>
                 </div>
               ) : templateSourceMode === "empty" ||
                 templateSourceMode === "empty_onboarding" ? (
-                <div className="mt-5 flex items-center gap-3 rounded-[18px] border border-panel-border/35 bg-[var(--theme-subtle-bg)] px-4 py-3">
+                <div className="mt-5 flex items-center gap-3 rounded-[18px] border border-border/35 bg-muted px-4 py-3">
                   <span className="text-[28px] leading-none">+</span>
                   <div className="min-w-0 flex-1">
-                    <div className="text-[14px] font-medium text-text-main">
+                    <div className="text-[14px] font-medium text-foreground">
                       Starting from scratch
                     </div>
-                    <div className="text-[12px] text-text-muted/72">
+                    <div className="text-[12px] text-muted-foreground/72">
                       Empty workspace scaffold
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setOnboardingStep("gallery")}
-                    className="shrink-0 text-[12px] text-text-muted/72 underline transition-colors hover:text-text-main"
+                    className="shrink-0 text-[12px] text-muted-foreground/72 underline transition-colors hover:text-foreground"
                   >
                     Change
                   </button>
                 </div>
               ) : templateSourceMode === "local" ? (
-                <div className="mt-5 flex items-center gap-3 rounded-[18px] border border-panel-border/35 bg-[var(--theme-subtle-bg)] px-4 py-3">
-                  <FolderOpen size={24} className="shrink-0 text-text-dim/72" />
+                <div className="mt-5 flex items-center gap-3 rounded-[18px] border border-border/35 bg-muted px-4 py-3">
+                  <FolderOpen size={24} className="shrink-0 text-muted-foreground/72" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[14px] font-medium text-text-main">
+                    <div className="truncate text-[14px] font-medium text-foreground">
                       {selectedTemplateFolder?.templateName || "Local template"}
                     </div>
-                    <div className="truncate text-[12px] text-text-muted/72">
+                    <div className="truncate text-[12px] text-muted-foreground/72">
                       {selectedTemplateFolder?.rootPath || "No folder selected"}
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => void chooseTemplateFolder()}
-                    className="shrink-0 text-[12px] text-text-muted/72 underline transition-colors hover:text-text-main"
+                    className="shrink-0 text-[12px] text-muted-foreground/72 underline transition-colors hover:text-foreground"
                   >
                     Change folder
                   </button>
@@ -726,25 +638,25 @@ function FirstWorkspacePane() {
 
               <div className="mt-6 grid gap-4" style={{ maxWidth: 480 }}>
                 <label className="grid gap-2">
-                  <span className="text-[11px] uppercase tracking-[0.22em] text-text-dim/78">
+                  <span className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground/78">
                     Workspace name
                   </span>
                   <input
                     value={newWorkspaceName}
                     onChange={(e) => setNewWorkspaceName(e.target.value)}
                     placeholder="My first workspace"
-                    className="theme-control-surface h-12 rounded-[18px] border border-panel-border/45 px-4 text-[14px] text-text-main outline-none placeholder:text-text-dim/50"
+                    className="theme-control-surface h-12 rounded-[18px] border border-border/45 px-4 text-[14px] text-foreground outline-none placeholder:text-muted-foreground/50"
                   />
                 </label>
 
                 <label className="grid gap-2">
-                  <span className="text-[11px] uppercase tracking-[0.22em] text-text-dim/78">
+                  <span className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground/78">
                     Harness
                   </span>
                   <select
                     value={selectedCreateHarness}
                     onChange={(e) => setSelectedCreateHarness(e.target.value)}
-                    className="theme-control-surface h-12 rounded-[18px] border border-panel-border/45 px-4 text-[14px] text-text-main outline-none"
+                    className="theme-control-surface h-12 rounded-[18px] border border-border/45 px-4 text-[14px] text-foreground outline-none"
                   >
                     {createHarnessOptions.map((option) => (
                       <option key={option.id} value={option.id}>
@@ -752,7 +664,7 @@ function FirstWorkspacePane() {
                       </option>
                     ))}
                   </select>
-                  <span className="text-[12px] leading-6 text-text-muted/74">
+                  <span className="text-[12px] leading-6 text-muted-foreground/74">
                     {selectedCreateHarnessOption?.description || ""}
                   </span>
                 </label>
@@ -760,31 +672,31 @@ function FirstWorkspacePane() {
 
               {pendingIntegrations && pendingIntegrations.requirements.length > 0 ? (
                 <div className="mt-6" style={{ maxWidth: 480 }}>
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-text-dim/78">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground/78">
                     Integrations
                   </div>
                   <div className="mt-2 grid gap-2">
                     {pendingIntegrations.connected_providers.map(provider => (
-                      <div key={provider} className="flex items-center justify-between rounded-[14px] border border-neon-green/25 bg-neon-green/6 px-4 py-3">
-                        <span className="text-[13px] font-medium text-text-main">
+                      <div key={provider} className="flex items-center justify-between rounded-[14px] border border-primary/25 bg-primary/6 px-4 py-3">
+                        <span className="text-[13px] font-medium text-foreground">
                           {PROVIDER_DISPLAY_NAMES[provider] ?? provider}
                         </span>
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-neon-green">
-                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-neon-green" />
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-primary">
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" />
                           Connected
                         </span>
                       </div>
                     ))}
                     {pendingIntegrations.missing_providers.map(provider => (
-                      <div key={provider} className="flex items-center justify-between rounded-[14px] border border-panel-border/35 bg-[var(--theme-subtle-bg)] px-4 py-3">
-                        <span className="text-[13px] font-medium text-text-main">
+                      <div key={provider} className="flex items-center justify-between rounded-[14px] border border-border/35 bg-muted px-4 py-3">
+                        <span className="text-[13px] font-medium text-foreground">
                           {PROVIDER_DISPLAY_NAMES[provider] ?? provider}
                         </span>
                         <button
                           type="button"
                           disabled={connectingProvider !== null}
                           onClick={() => void handleConnectProvider(provider)}
-                          className="rounded-[10px] border border-neon-green/35 bg-neon-green/8 px-3 py-1 text-[11px] font-medium text-neon-green transition-colors hover:bg-neon-green/14 disabled:opacity-50"
+                          className="rounded-[10px] border border-primary/35 bg-primary/8 px-3 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/14 disabled:opacity-50"
                         >
                           {connectingProvider === provider ? "Connecting..." : "Connect"}
                         </button>
@@ -792,11 +704,11 @@ function FirstWorkspacePane() {
                     ))}
                   </div>
                   {connectStatus ? (
-                    <div className="mt-2 text-[12px] text-text-muted">{connectStatus}</div>
+                    <div className="mt-2 text-[12px] text-muted-foreground">{connectStatus}</div>
                   ) : null}
                 </div>
               ) : isResolvingIntegrations ? (
-                <div className="mt-6 text-[12px] text-text-muted" style={{ maxWidth: 480 }}>
+                <div className="mt-6 text-[12px] text-muted-foreground" style={{ maxWidth: 480 }}>
                   Checking integrations...
                 </div>
               ) : null}
@@ -812,7 +724,7 @@ function FirstWorkspacePane() {
                   type="button"
                   disabled={configureCreateDisabled || hasUnconnectedIntegrations || isResolvingIntegrations}
                   onClick={() => void createWorkspace()}
-                  className="inline-flex h-12 items-center justify-center gap-3 rounded-[18px] border border-[rgba(247,90,84,0.38)] bg-[rgba(247,90,84,0.9)] px-5 text-[14px] font-medium text-white transition-colors hover:bg-[rgba(226,79,74,0.94)] disabled:cursor-not-allowed disabled:border-panel-border disabled:bg-panel-border/20 disabled:text-text-muted/60"
+                  className="inline-flex h-12 items-center justify-center gap-3 rounded-[18px] border border-[rgba(247,90,84,0.38)] bg-[rgba(247,90,84,0.9)] px-5 text-[14px] font-medium text-white transition-colors hover:bg-[rgba(226,79,74,0.94)] disabled:cursor-not-allowed disabled:border-border disabled:bg-border/20 disabled:text-muted-foreground/60"
                 >
                   <span>Create Workspace</span>
                   <ArrowRight size={16} />
@@ -820,7 +732,7 @@ function FirstWorkspacePane() {
                 <button
                   type="button"
                   onClick={() => setOnboardingStep("gallery")}
-                  className="text-[12px] text-text-muted/72 underline transition-colors hover:text-text-main"
+                  className="text-[12px] text-muted-foreground/72 underline transition-colors hover:text-foreground"
                 >
                   Back to kits
                 </button>
@@ -829,52 +741,52 @@ function FirstWorkspacePane() {
           ) : onboardingStep === "connect_integrations" && pendingIntegrations ? (
             <div>
               <div className="max-w-3xl">
-                <div className="text-[11px] uppercase tracking-[0.24em] text-text-dim/78">
+                <div className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground/78">
                   Connect integrations
                 </div>
-                <h1 className="mt-3 text-[28px] font-semibold tracking-[-0.04em] text-text-main sm:text-[34px]">
+                <h1 className="mt-3 text-[28px] font-semibold tracking-[-0.04em] text-foreground sm:text-[34px]">
                   This workspace needs access
                 </h1>
-                <p className="mt-2 text-[14px] leading-7 text-text-muted/84">
+                <p className="mt-2 text-[14px] leading-7 text-muted-foreground/84">
                   Connect the following accounts to continue.
                 </p>
               </div>
 
               <div className="mt-6 grid gap-3" style={{ maxWidth: 480 }}>
                 {pendingIntegrations.missing_providers.map(provider => (
-                  <div key={provider} className="flex items-center justify-between rounded-[18px] border border-panel-border/35 bg-[var(--theme-subtle-bg)] px-5 py-4">
-                    <div className="text-[14px] font-medium text-text-main">
+                  <div key={provider} className="flex items-center justify-between rounded-[18px] border border-border/35 bg-muted px-5 py-4">
+                    <div className="text-[14px] font-medium text-foreground">
                       {PROVIDER_DISPLAY_NAMES[provider] ?? provider}
                     </div>
                     <button
                       type="button"
                       disabled={connectingProvider !== null}
                       onClick={() => void handleConnectProvider(provider)}
-                      className="inline-flex h-9 items-center rounded-[12px] border border-neon-green/35 bg-neon-green/8 px-4 text-[12px] font-medium text-neon-green transition-colors hover:bg-neon-green/14 disabled:opacity-50"
+                      className="inline-flex h-9 items-center rounded-[12px] border border-primary/35 bg-primary/8 px-4 text-[12px] font-medium text-primary transition-colors hover:bg-primary/14 disabled:opacity-50"
                     >
                       {connectingProvider === provider ? "Connecting..." : "Connect"}
                     </button>
                   </div>
                 ))}
                 {pendingIntegrations.connected_providers.map(provider => (
-                  <div key={provider} className="flex items-center justify-between rounded-[18px] border border-neon-green/20 bg-neon-green/4 px-5 py-4">
-                    <div className="text-[14px] font-medium text-text-main">
+                  <div key={provider} className="flex items-center justify-between rounded-[18px] border border-primary/20 bg-primary/4 px-5 py-4">
+                    <div className="text-[14px] font-medium text-foreground">
                       {PROVIDER_DISPLAY_NAMES[provider] ?? provider}
                     </div>
-                    <span className="text-[12px] font-medium text-neon-green">Connected</span>
+                    <span className="text-[12px] font-medium text-primary">Connected</span>
                   </div>
                 ))}
               </div>
 
               {connectStatus ? (
-                <div className="mt-4 text-[13px] text-text-muted">{connectStatus}</div>
+                <div className="mt-4 text-[13px] text-muted-foreground">{connectStatus}</div>
               ) : null}
 
               <div className="mt-5">
                 <button
                   type="button"
                   onClick={() => { clearPendingIntegrations(); setOnboardingStep("configure"); }}
-                  className="text-[12px] text-text-muted/72 underline transition-colors hover:text-text-main"
+                  className="text-[12px] text-muted-foreground/72 underline transition-colors hover:text-foreground"
                 >
                   &larr; Back to configure
                 </button>
@@ -901,11 +813,11 @@ function WorkspaceBootstrapPane() {
   return (
     <section className="relative flex h-full min-h-0 min-w-0 items-center justify-center overflow-hidden px-6">
       <div className="flex flex-col items-center text-center">
-        <Loader2 size={20} className="animate-spin text-text-dim/60" />
-        <h2 className="mt-5 text-[17px] font-medium tracking-[-0.01em] text-text-main">
+        <Loader2 size={20} className="animate-spin text-muted-foreground/60" />
+        <h2 className="mt-5 text-[17px] font-medium tracking-[-0.01em] text-foreground">
           Preparing desktop...
         </h2>
-        <p className="mt-2 max-w-sm text-[13px] leading-6 text-text-muted/70">
+        <p className="mt-2 max-w-sm text-[13px] leading-6 text-muted-foreground/70">
           Restoring workspace state and attaching surfaces.
         </p>
       </div>
@@ -932,13 +844,13 @@ function WorkspaceInitializingGate({
         {hasErrors ? (
           <TriangleAlert size={20} className="text-rose-400" />
         ) : (
-          <Loader2 size={20} className="animate-spin text-text-dim/60" />
+          <Loader2 size={20} className="animate-spin text-muted-foreground/60" />
         )}
 
-        <h2 className="mt-5 text-[17px] font-medium tracking-[-0.01em] text-text-main">
+        <h2 className="mt-5 text-[17px] font-medium tracking-[-0.01em] text-foreground">
           {hasErrors ? "Some apps need attention" : "Setting up workspace"}
         </h2>
-        <p className="mt-2 max-w-sm text-[13px] leading-6 text-text-muted/70">
+        <p className="mt-2 max-w-sm text-[13px] leading-6 text-muted-foreground/70">
           {hasErrors
             ? "Some workspace apps encountered errors."
             : "Starting workspace apps. This may take a moment on first setup."}
@@ -948,25 +860,25 @@ function WorkspaceInitializingGate({
           {apps.map((app) => (
             <div
               key={app.id}
-              className="flex items-center gap-3 rounded-[14px] border border-panel-border/35 bg-[var(--theme-subtle-bg)] px-4 py-2.5"
+              className="flex items-center gap-3 rounded-[14px] border border-border/35 bg-muted px-4 py-2.5"
             >
               {app.ready ? (
-                <CircleCheck size={14} className="shrink-0 text-neon-green" />
+                <CircleCheck size={14} className="shrink-0 text-primary" />
               ) : app.error ? (
                 <XCircle size={14} className="shrink-0 text-rose-400" />
               ) : (
-                <Loader2 size={14} className="shrink-0 animate-spin text-text-dim/50" />
+                <Loader2 size={14} className="shrink-0 animate-spin text-muted-foreground/50" />
               )}
-              <span className="min-w-0 flex-1 text-left text-[13px] text-text-main">
+              <span className="min-w-0 flex-1 text-left text-[13px] text-foreground">
                 {app.label}
               </span>
               <span
                 className={`text-[11px] ${
                   app.ready
-                    ? "text-neon-green"
+                    ? "text-primary"
                     : app.error
                       ? "text-rose-400"
-                      : "text-text-dim/60"
+                      : "text-muted-foreground/60"
                 }`}
               >
                 {app.ready ? "Ready" : app.error ? "Failed" : "Setting up..."}
@@ -976,7 +888,7 @@ function WorkspaceInitializingGate({
         </div>
 
         {!hasErrors ? (
-          <div className="mt-3 text-[12px] text-text-muted/60">
+          <div className="mt-3 text-[12px] text-muted-foreground/60">
             {readyCount} of {apps.length} ready
           </div>
         ) : null}
@@ -995,16 +907,16 @@ function FocusPlaceholder({
   description: string;
 }) {
   return (
-    <section className="theme-shell soft-vignette neon-border relative flex h-full min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-[var(--theme-radius-card)] shadow-card">
+    <section className="theme-shell soft-vignette neon-border relative flex h-full min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-[var(--radius-xl)] shadow-lg">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(87,255,173,0.08),transparent_45%)]" />
       <div className="relative max-w-[520px] px-8 text-center">
-        <div className="text-[10px] uppercase tracking-[0.18em] text-neon-green/78">
+        <div className="text-[10px] uppercase tracking-[0.18em] text-primary/78">
           {eyebrow}
         </div>
-        <div className="mt-3 text-[28px] font-semibold tracking-[-0.03em] text-text-main">
+        <div className="mt-3 text-[28px] font-semibold tracking-[-0.03em] text-foreground">
           {title}
         </div>
-        <div className="mt-3 text-[13px] leading-7 text-text-muted/84">
+        <div className="mt-3 text-[13px] leading-7 text-muted-foreground/84">
           {description}
         </div>
       </div>
@@ -1014,25 +926,25 @@ function FocusPlaceholder({
 
 function WorkspaceStartupErrorPane({ message }: { message: string }) {
   return (
-    <section className="theme-shell relative flex h-full min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-[var(--theme-radius-card)] shadow-card">
+    <section className="theme-shell relative flex h-full min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-[var(--radius-xl)] shadow-lg">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(247,90,84,0.12),transparent_32%),radial-gradient(circle_at_bottom,rgba(247,170,126,0.08),transparent_36%)]" />
       <div className="relative w-full max-w-[720px] px-6 py-8">
-        <div className="theme-subtle-surface rounded-[30px] border border-[rgba(247,90,84,0.24)] p-6 shadow-card sm:p-8">
+        <div className="theme-subtle-surface rounded-[30px] border border-[rgba(247,90,84,0.24)] p-6 shadow-lg sm:p-8">
           <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(247,90,84,0.22)] bg-[rgba(247,90,84,0.08)] px-3 py-1.5 text-[10px] uppercase tracking-[0.22em] text-[rgba(206,92,84,0.92)]">
             <TriangleAlert size={12} />
             <span>Desktop startup blocked</span>
           </div>
-          <div className="mt-6 text-[30px] font-semibold tracking-[-0.04em] text-text-main">
+          <div className="mt-6 text-[30px] font-semibold tracking-[-0.04em] text-foreground">
             The local runtime failed to start
           </div>
-          <div className="mt-3 text-[14px] leading-7 text-text-muted/84">
+          <div className="mt-3 text-[14px] leading-7 text-muted-foreground/84">
             The desktop shell cannot finish restoring workspaces until the
             embedded runtime comes online.
           </div>
-          <div className="mt-6 rounded-[20px] border border-[rgba(247,90,84,0.22)] bg-[rgba(247,90,84,0.06)] px-4 py-4 text-[13px] leading-7 text-text-main">
+          <div className="mt-6 rounded-[20px] border border-[rgba(247,90,84,0.22)] bg-[rgba(247,90,84,0.06)] px-4 py-4 text-[13px] leading-7 text-foreground">
             {message}
           </div>
-          <div className="mt-5 text-[12px] leading-6 text-text-muted/76">
+          <div className="mt-5 text-[12px] leading-6 text-muted-foreground/76">
             Check `runtime.log` in the Electron userData directory and confirm
             the required desktop runtime configuration is present.
           </div>
@@ -1070,10 +982,6 @@ function AppShellContent() {
     hasHydratedWorkspaceList,
     selectedWorkspace,
     installedApps,
-    isLoadingInstalledApps,
-    isActivatingWorkspace,
-    workspaceAppsReady,
-    workspaceBlockingReason,
     workspaceErrorMessage,
     onboardingModeActive,
   } = useWorkspaceDesktop();
@@ -1083,15 +991,12 @@ function AppShellContent() {
   const [appUpdateStatus, setAppUpdateStatus] =
     useState<AppUpdateStatusPayload | null>(null);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
-  const [settingsDialogSection, setSettingsDialogSection] = useState<UiSettingsPaneSection>("models");
-  const [activeLeftRailItem, setActiveLeftRailItem] = useState<LeftRailItem>("space");
+  const [settingsDialogSection, setSettingsDialogSection] =
+    useState<UiSettingsPaneSection>("settings");
+  const [activeLeftRailItem, setActiveLeftRailItem] =
+    useState<LeftRailItem>("space");
   const [agentView, setAgentView] = useState<AgentView>({ type: "chat" });
   const [chatFocusRequestKey, setChatFocusRequestKey] = useState(1);
-  const [chatSessionRequest, setChatSessionRequest] = useState<{
-    workspaceId: string;
-    sessionId: string;
-    key: number;
-  } | null>(null);
   const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false);
   const [spaceVisibility, setSpaceVisibility] =
     useState<SpaceVisibilityState>(loadSpaceVisibility);
@@ -1099,18 +1004,19 @@ function AppShellContent() {
   const [browserPaneWidth, setBrowserPaneWidth] =
     useState(loadBrowserPaneWidth);
   const [isUtilityPaneResizing, setIsUtilityPaneResizing] = useState(false);
-  const [operationsDrawerOpen, setOperationsDrawerOpen] = useState(loadOperationsDrawerOpen);
-  const [activeOperationsTab, setActiveOperationsTab] = useState<OperationsDrawerTab>(loadOperationsDrawerTab);
-  const [taskProposals, setTaskProposals] = useState<TaskProposalRecordPayload[]>([]);
-  const [proactiveStatus, setProactiveStatus] = useState<ProactiveAgentStatusPayload | null>(null);
+  const [operationsDrawerOpen, setOperationsDrawerOpen] = useState(
+    loadOperationsDrawerOpen,
+  );
+  const [activeOperationsTab, setActiveOperationsTab] =
+    useState<OperationsDrawerTab>(loadOperationsDrawerTab);
+  const [taskProposals, setTaskProposals] = useState<
+    TaskProposalRecordPayload[]
+  >([]);
   const [isLoadingTaskProposals, setIsLoadingTaskProposals] = useState(false);
-  const [isTriggeringTaskProposal, setIsTriggeringTaskProposal] = useState(false);
-  const [taskProposalStatusMessage, setTaskProposalStatusMessage] = useState("");
-  const [agentSessions, setAgentSessions] = useState<AgentSessionRecordPayload[]>([]);
-  const [runtimeSessions, setRuntimeSessions] = useState<SessionRuntimeRecordPayload[]>([]);
-  const [isLoadingRunningEntries, setIsLoadingRunningEntries] = useState(false);
-  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
-  const [managedSessionRuntimes, setManagedSessionRuntimes] = useState<Record<string, ManagedSessionRuntimeState>>({});
+  const [isTriggeringTaskProposal, setIsTriggeringTaskProposal] =
+    useState(false);
+  const [taskProposalStatusMessage, setTaskProposalStatusMessage] =
+    useState("");
   const [proposalAction, setProposalAction] = useState<{
     proposalId: string;
     action: "accept" | "dismiss";
@@ -1128,23 +1034,29 @@ function AppShellContent() {
   const filesPaneWidthRef = useRef(filesPaneWidth);
   const browserPaneWidthRef = useRef(browserPaneWidth);
   const spaceVisibilityRef = useRef(spaceVisibility);
-  const managedSessionRuntimesRef = useRef<Record<string, ManagedSessionRuntimeState>>({});
-  const managedStreamSessionKeyRef = useRef<Map<string, string>>(new Map());
-  const previousSelectedWorkspaceIdRef = useRef<string | null>(selectedWorkspaceId ?? null);
 
   filesPaneWidthRef.current = filesPaneWidth;
   browserPaneWidthRef.current = browserPaneWidth;
   spaceVisibilityRef.current = spaceVisibility;
-  managedSessionRuntimesRef.current = managedSessionRuntimes;
 
   const clampUtilityPaneWidth = useCallback(
-    (paneId: UtilityPaneId, width: number, options?: { filesWidth?: number; browserWidth?: number }) => {
-      const hostWidth = utilityPaneHostRef.current?.getBoundingClientRect().width ?? 0;
-      const effectiveFilesWidth = options?.filesWidth ?? filesPaneWidthRef.current;
-      const effectiveBrowserWidth = options?.browserWidth ?? browserPaneWidthRef.current;
-      const minPaneWidth = minUtilityPaneWidth(paneId);
-      const visiblePaneIds = FIXED_SPACE_ORDER.filter((pane) => spaceVisibilityRef.current[pane]);
-      const flexPaneId = visiblePaneIds.includes("agent") ? "agent" : visiblePaneIds[visiblePaneIds.length - 1] ?? null;
+    (
+      paneId: UtilityPaneId,
+      width: number,
+      options?: { filesWidth?: number; browserWidth?: number },
+    ) => {
+      const hostWidth =
+        utilityPaneHostRef.current?.getBoundingClientRect().width ?? 0;
+      const effectiveFilesWidth =
+        options?.filesWidth ?? filesPaneWidthRef.current;
+      const effectiveBrowserWidth =
+        options?.browserWidth ?? browserPaneWidthRef.current;
+      const visiblePaneIds = FIXED_SPACE_ORDER.filter(
+        (pane) => spaceVisibilityRef.current[pane],
+      );
+      const flexPaneId = visiblePaneIds.includes("agent")
+        ? "agent"
+        : (visiblePaneIds[visiblePaneIds.length - 1] ?? null);
       const resizerCount = Math.max(0, visiblePaneIds.length - 1);
       const fixedOtherWidths = visiblePaneIds.reduce((total, visiblePaneId) => {
         if (
@@ -1162,31 +1074,46 @@ function AppShellContent() {
         );
       }, 0);
       const minFlexibleWidth =
-        flexPaneId === "agent" ? MIN_AGENT_CONTENT_WIDTH : minUtilityPaneWidth(flexPaneId as UtilityPaneId);
+        flexPaneId === "agent"
+          ? MIN_AGENT_CONTENT_WIDTH
+          : MIN_UTILITY_PANE_WIDTH;
       const maxWidth =
         hostWidth > 0
           ? Math.min(
               MAX_UTILITY_PANE_WIDTH,
               Math.max(
-                minPaneWidth,
-                hostWidth - fixedOtherWidths - minFlexibleWidth - resizerCount * UTILITY_PANE_RESIZER_WIDTH
-              )
+                MIN_UTILITY_PANE_WIDTH,
+                hostWidth -
+                  fixedOtherWidths -
+                  minFlexibleWidth -
+                  resizerCount * UTILITY_PANE_RESIZER_WIDTH,
+              ),
             )
           : MAX_UTILITY_PANE_WIDTH;
-      return Math.max(minPaneWidth, Math.min(width, maxWidth));
+      return Math.max(MIN_UTILITY_PANE_WIDTH, Math.min(width, maxWidth));
     },
     [],
   );
 
   const clampPairedUtilityPaneWidths = useCallback(
-    (leftPaneId: UtilityPaneId, rightPaneId: UtilityPaneId, leftWidth: number, rightWidth: number) => {
-      const hostWidth = utilityPaneHostRef.current?.getBoundingClientRect().width ?? 0;
-      const minLeftWidth = minUtilityPaneWidth(leftPaneId);
-      const minRightWidth = minUtilityPaneWidth(rightPaneId);
+    (
+      leftPaneId: UtilityPaneId,
+      rightPaneId: UtilityPaneId,
+      leftWidth: number,
+      rightWidth: number,
+    ) => {
+      const hostWidth =
+        utilityPaneHostRef.current?.getBoundingClientRect().width ?? 0;
       if (hostWidth <= 0) {
         return {
-          leftWidth: Math.max(minLeftWidth, Math.min(leftWidth, MAX_UTILITY_PANE_WIDTH)),
-          rightWidth: Math.max(minRightWidth, Math.min(rightWidth, MAX_UTILITY_PANE_WIDTH))
+          leftWidth: Math.max(
+            MIN_UTILITY_PANE_WIDTH,
+            Math.min(leftWidth, MAX_UTILITY_PANE_WIDTH),
+          ),
+          rightWidth: Math.max(
+            MIN_UTILITY_PANE_WIDTH,
+            Math.min(rightWidth, MAX_UTILITY_PANE_WIDTH),
+          ),
         };
       }
 
@@ -1224,14 +1151,17 @@ function AppShellContent() {
       const maxCombinedWidth = Math.min(
         MAX_UTILITY_PANE_WIDTH * 2,
         Math.max(
-          minLeftWidth + minRightWidth,
-          hostWidth - fixedOtherWidths - MIN_AGENT_CONTENT_WIDTH - resizerCount * UTILITY_PANE_RESIZER_WIDTH
-        )
+          MIN_UTILITY_PANE_WIDTH * 2,
+          hostWidth -
+            fixedOtherWidths -
+            MIN_AGENT_CONTENT_WIDTH -
+            resizerCount * UTILITY_PANE_RESIZER_WIDTH,
+        ),
       );
-      const combinedWidth = Math.max(minLeftWidth + minRightWidth, Math.min(leftWidth + rightWidth, maxCombinedWidth));
+      const combinedWidth = Math.min(leftWidth + rightWidth, maxCombinedWidth);
       const nextLeftWidth = Math.max(
-        minLeftWidth,
-        Math.min(leftWidth, combinedWidth - minRightWidth)
+        MIN_UTILITY_PANE_WIDTH,
+        Math.min(leftWidth, combinedWidth - MIN_UTILITY_PANE_WIDTH),
       );
       return {
         leftWidth: nextLeftWidth,
@@ -1340,7 +1270,9 @@ function AppShellContent() {
     }
 
     const unsubscribe = window.electronAPI.ui.onOpenSettingsPane((section) => {
-      setSettingsDialogSection(isSettingsPaneSection(section) ? section : "models");
+      setSettingsDialogSection(
+        isSettingsPaneSection(section) ? section : "settings",
+      );
       setSettingsDialogOpen(true);
       void window.electronAPI.auth.closePopup();
     });
@@ -1490,257 +1422,9 @@ function AppShellContent() {
     setSelectedOutputId(nextEntry.id);
   };
 
-  const refreshRunningEntries = useCallback(async () => {
-    if (!selectedWorkspaceId) {
-      setAgentSessions([]);
-      setRuntimeSessions([]);
-      setIsLoadingRunningEntries(false);
-      return;
-    }
-
-    setIsLoadingRunningEntries(true);
-    try {
-      const [sessionsResponse, runtimeStatesResponse] = await Promise.all([
-        window.electronAPI.workspace.listAgentSessions(selectedWorkspaceId),
-        window.electronAPI.workspace.listRuntimeStates(selectedWorkspaceId)
-      ]);
-      setAgentSessions(sessionsResponse.items);
-      setRuntimeSessions(runtimeStatesResponse.items);
-    } finally {
-      setIsLoadingRunningEntries(false);
-    }
-  }, [selectedWorkspaceId]);
-
-  const updateManagedSessionRuntime = useCallback(
-    (
-      key: string,
-      updater: (current: ManagedSessionRuntimeState | null) => ManagedSessionRuntimeState | null
-    ) => {
-      setManagedSessionRuntimes((previous) => {
-        const current = previous[key] ?? null;
-        const next = updater(current);
-        if (!next) {
-          if (!(key in previous)) {
-            return previous;
-          }
-          const trimmed = { ...previous };
-          delete trimmed[key];
-          return trimmed;
-        }
-        return {
-          ...previous,
-          [key]: next
-        };
-      });
-    },
-    []
-  );
-
-  const closeManagedSessionStream = useCallback(
-    async (key: string, reason: string) => {
-      const current = managedSessionRuntimesRef.current[key];
-      const streamId = current?.streamId;
-      if (!streamId) {
-        return;
-      }
-      managedStreamSessionKeyRef.current.delete(streamId);
-      await window.electronAPI.workspace.closeSessionOutputStream(streamId, reason).catch(() => undefined);
-      updateManagedSessionRuntime(key, (snapshot) => (snapshot && snapshot.streamId === streamId ? { ...snapshot, streamId: null } : snapshot));
-    },
-    [updateManagedSessionRuntime]
-  );
-
-  const openManagedSessionStream = useCallback(
-    async (options: {
-      workspaceId: string;
-      sessionId: string;
-      inputId: string;
-      includeHistory?: boolean;
-    }) => {
-      const key = managedSessionKey(options.workspaceId, options.sessionId);
-      const current = managedSessionRuntimesRef.current[key];
-      if (current?.streamId && current.currentInputId === options.inputId) {
-        return current.streamId;
-      }
-      if (current?.streamId) {
-        await closeManagedSessionStream(key, "managed_stream_reopen");
-      }
-      const handle = await window.electronAPI.workspace.openSessionOutputStream({
-        sessionId: options.sessionId,
-        workspaceId: options.workspaceId,
-        inputId: options.inputId,
-        includeHistory: options.includeHistory ?? true,
-        stopOnTerminal: true
-      });
-      managedStreamSessionKeyRef.current.set(handle.streamId, key);
-      updateManagedSessionRuntime(key, (snapshot) =>
-        snapshot
-          ? {
-              ...snapshot,
-              streamId: handle.streamId
-            }
-          : {
-              workspaceId: options.workspaceId,
-              sessionId: options.sessionId,
-              runtimeStatus: "QUEUED",
-              currentInputId: options.inputId,
-              errorMessage: "",
-              events: [],
-              historyVersion: 0,
-              awaitingHistoryHydration: false,
-              streamId: handle.streamId
-            }
-      );
-      return handle.streamId;
-    },
-    [closeManagedSessionStream, updateManagedSessionRuntime]
-  );
-
-  const syncManagedSessionRuntime = useCallback(
-    async (options: {
-      workspaceId: string;
-      sessionId: string;
-      runtimeStatus: string;
-      currentInputId: string | null;
-      errorMessage?: string;
-      currentInputEvents?: SessionOutputEventPayload[];
-    }) => {
-      const key = managedSessionKey(options.workspaceId, options.sessionId);
-      const current = managedSessionRuntimesRef.current[key] ?? null;
-      const normalizedStatus = normalizeRuntimeStatus(options.runtimeStatus);
-      const nextInputId = (options.currentInputId || "").trim() || null;
-      const inputChanged = current?.currentInputId !== nextInputId;
-      const terminalTransition =
-        inputChanged &&
-        !nextInputId &&
-        Boolean(current?.currentInputId) &&
-        (normalizedStatus === "IDLE" || normalizedStatus === "ERROR");
-      if (inputChanged && current?.streamId) {
-        await closeManagedSessionStream(key, "managed_input_changed");
-      }
-
-      const nextEvents =
-        inputChanged
-          ? terminalTransition
-            ? current?.events ?? options.currentInputEvents ?? []
-            : options.currentInputEvents ?? []
-          : mergeSessionOutputEvents(current?.events ?? [], options.currentInputEvents ?? []);
-      const nextErrorMessage =
-        normalizedStatus === "ERROR"
-          ? options.errorMessage || current?.errorMessage || ""
-          : terminalTransition
-            ? current?.errorMessage || ""
-          : inputChanged
-            ? ""
-            : current?.errorMessage || "";
-
-      updateManagedSessionRuntime(key, (snapshot) => {
-        const currentHistoryVersion = snapshot?.historyVersion ?? 0;
-        const alreadyAwaitingHydration = snapshot?.awaitingHistoryHydration ?? false;
-        return {
-          workspaceId: options.workspaceId,
-          sessionId: options.sessionId,
-          runtimeStatus: normalizedStatus,
-          currentInputId: nextInputId,
-          errorMessage: nextErrorMessage,
-          events: nextEvents,
-          historyVersion: terminalTransition && !alreadyAwaitingHydration ? currentHistoryVersion + 1 : currentHistoryVersion,
-          awaitingHistoryHydration: terminalTransition ? true : inputChanged ? false : alreadyAwaitingHydration,
-          streamId: inputChanged ? null : snapshot?.streamId ?? null
-        };
-      });
-
-      if ((normalizedStatus === "BUSY" || normalizedStatus === "QUEUED") && nextInputId) {
-        await openManagedSessionStream({
-          workspaceId: options.workspaceId,
-          sessionId: options.sessionId,
-          inputId: nextInputId,
-          includeHistory: nextEvents.length === 0
-        }).catch(() => undefined);
-      } else if (normalizedStatus !== "BUSY" && normalizedStatus !== "QUEUED" && current?.streamId) {
-        await closeManagedSessionStream(key, `managed_status_${normalizedStatus.toLowerCase() || "idle"}`);
-      }
-    },
-    [closeManagedSessionStream, openManagedSessionStream, updateManagedSessionRuntime]
-  );
-
-  const observeManagedSession = useCallback(
-    (payload: ManagedChatSessionObservedPayload) => {
-      void syncManagedSessionRuntime({
-        workspaceId: payload.workspaceId,
-        sessionId: payload.sessionId,
-        runtimeStatus: payload.runtimeStatus,
-        currentInputId: payload.currentInputId,
-        currentInputEvents: payload.currentInputEvents
-      });
-    },
-    [syncManagedSessionRuntime]
-  );
-
-  const acknowledgeManagedHistoryHydration = useCallback(
-    (payload: { workspaceId: string; sessionId: string; historyVersion: number }) => {
-      const key = managedSessionKey(payload.workspaceId, payload.sessionId);
-      updateManagedSessionRuntime(key, (snapshot) => {
-        if (!snapshot || !snapshot.awaitingHistoryHydration || snapshot.historyVersion !== payload.historyVersion) {
-          return snapshot;
-        }
-        const runtimeStatus = normalizeRuntimeStatus(snapshot.runtimeStatus);
-        if (runtimeStatus === "BUSY" || runtimeStatus === "QUEUED" || runtimeStatus === "WAITING_USER") {
-          return {
-            ...snapshot,
-            awaitingHistoryHydration: false
-          };
-        }
-        return {
-          ...snapshot,
-          currentInputId: null,
-          errorMessage: "",
-          events: [],
-          awaitingHistoryHydration: false
-        };
-      });
-    },
-    [updateManagedSessionRuntime]
-  );
-
-  const queueManagedSessionInput = useCallback(
-    async (payload: ManagedQueueSessionInputPayload) => {
-      const queued = await window.electronAPI.workspace.queueSessionInput({
-        text: payload.text,
-        workspace_id: payload.workspaceId,
-        image_urls: null,
-        attachments: payload.attachments,
-        session_id: payload.sessionId,
-        priority: 0,
-        model: payload.model
-      });
-      const key = managedSessionKey(payload.workspaceId, queued.session_id);
-      updateManagedSessionRuntime(key, (snapshot) => ({
-        workspaceId: payload.workspaceId,
-        sessionId: queued.session_id,
-        runtimeStatus: "QUEUED",
-        currentInputId: queued.input_id,
-        errorMessage: "",
-        events: [],
-        historyVersion: snapshot?.historyVersion ?? 0,
-        awaitingHistoryHydration: false,
-        streamId: snapshot?.streamId ?? null
-      }));
-      await openManagedSessionStream({
-        workspaceId: payload.workspaceId,
-        sessionId: queued.session_id,
-        inputId: queued.input_id,
-        includeHistory: true
-      }).catch(() => undefined);
-      return queued;
-    },
-    [openManagedSessionStream, updateManagedSessionRuntime]
-  );
-
   async function refreshTaskProposals(options?: { logErrors?: boolean }) {
     if (!selectedWorkspaceId || !selectedWorkspace) {
       setTaskProposals([]);
-      setProactiveStatus(null);
       setTaskProposalStatusMessage("");
       return;
     }
@@ -1748,12 +1432,10 @@ function AppShellContent() {
     setTaskProposalStatusMessage("");
     setIsLoadingTaskProposals(true);
     try {
-      const [proposalResponse, statusResponse] = await Promise.all([
-        window.electronAPI.workspace.listTaskProposals(selectedWorkspace.id),
-        window.electronAPI.workspace.getProactiveStatus(selectedWorkspace.id)
-      ]);
-      setTaskProposals(proposalResponse.proposals);
-      setProactiveStatus(statusResponse);
+      const response = await window.electronAPI.workspace.listTaskProposals(
+        selectedWorkspace.id,
+      );
+      setTaskProposals(response.proposals);
     } catch (error) {
       const message = normalizeErrorMessage(error);
       setTaskProposalStatusMessage(message);
@@ -1777,7 +1459,6 @@ function AppShellContent() {
     if (!selectedWorkspaceId) {
       return;
     }
-
     setIsTriggeringTaskProposal(true);
     setTaskProposalStatusMessage("");
     try {
@@ -1826,29 +1507,35 @@ function AppShellContent() {
     setProposalAction({ proposalId: proposal.proposal_id, action: "accept" });
     setTaskProposalStatusMessage("");
     try {
-      const runtimeStatesResponse = await window.electronAPI.workspace.listRuntimeStates(selectedWorkspaceId);
-      const parentSessionId = preferredSessionId(selectedWorkspace, runtimeStatesResponse.items);
-      if (!parentSessionId) {
+      const runtimeStatesResponse =
+        await window.electronAPI.workspace.listRuntimeStates(
+          selectedWorkspaceId,
+        );
+      const targetSessionId = preferredSessionId(
+        selectedWorkspace,
+        runtimeStatesResponse.items,
+      );
+      if (!targetSessionId) {
         throw new Error("No active session found for this workspace.");
       }
 
-      const accepted = await window.electronAPI.workspace.acceptTaskProposal({
-        proposal_id: proposal.proposal_id,
-        parent_session_id: parentSessionId,
-        task_name: proposal.task_name,
-        task_prompt: proposal.task_prompt,
+      await window.electronAPI.workspace.queueSessionInput({
+        text: proposal.task_prompt,
+        workspace_id: selectedWorkspaceId,
+        image_urls: null,
+        session_id: targetSessionId,
         priority: 0,
         model: runtimeConfig?.defaultModel ?? null,
       });
+      await window.electronAPI.workspace.updateTaskProposalState(
+        proposal.proposal_id,
+        "accepted",
+      );
 
-      const targetSessionId = accepted.session.session_id;
-      setActiveOperationsTab("running");
-      setOperationsDrawerOpen(true);
-
-      const detail = `Queued "${proposal.task_name}" into child session ${targetSessionId}. Open it from Running when you want to enter that session.`;
+      const detail = `Queued "${proposal.task_name}" into session ${targetSessionId}.`;
       const inferredAppId = inferInstalledWorkspaceAppIdFromText(
-        `${accepted.proposal.task_name}\n${accepted.proposal.task_prompt}`,
-        installedApps
+        `${proposal.task_name}\n${proposal.task_prompt}`,
+        installedApps,
       );
       setTaskProposalStatusMessage(detail);
       appendOutputEntry({
@@ -1868,7 +1555,6 @@ function AppShellContent() {
               surface: "event",
             },
       });
-      await refreshRunningEntries();
       void refreshRuntimeOutputs();
       await refreshTaskProposals();
     } catch (error) {
@@ -1929,78 +1615,22 @@ function AppShellContent() {
   }
 
   useEffect(() => {
-    if (!selectedWorkspaceId) {
-      setAgentSessions([]);
-      setRuntimeSessions([]);
-      setIsLoadingRunningEntries(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    const load = async () => {
-      setIsLoadingRunningEntries(true);
-      try {
-        const [sessionsResponse, runtimeStatesResponse] = await Promise.all([
-          window.electronAPI.workspace.listAgentSessions(selectedWorkspaceId),
-          window.electronAPI.workspace.listRuntimeStates(selectedWorkspaceId)
-        ]);
-        if (!cancelled) {
-          setAgentSessions(sessionsResponse.items);
-          setRuntimeSessions(runtimeStatesResponse.items);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingRunningEntries(false);
-        }
-      }
-    };
-
-    void load();
-    const timer = window.setInterval(() => {
-      void load();
-    }, 5000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [selectedWorkspaceId]);
-
-  useEffect(() => {
-    const previousWorkspaceId = previousSelectedWorkspaceIdRef.current;
-    previousSelectedWorkspaceIdRef.current = selectedWorkspaceId ?? null;
-    if (!previousWorkspaceId || previousWorkspaceId === selectedWorkspaceId) {
-      return;
-    }
-    for (const key of Object.keys(managedSessionRuntimesRef.current)) {
-      if (key.startsWith(`${previousWorkspaceId}:`)) {
-        void closeManagedSessionStream(key, "workspace_switch");
-      }
-    }
-  }, [closeManagedSessionStream, selectedWorkspaceId]);
-
-  useEffect(() => {
     if (!selectedWorkspaceId || !selectedWorkspace) {
       setTaskProposals([]);
-      setProactiveStatus(null);
       setTaskProposalStatusMessage("");
       setIsLoadingTaskProposals(false);
       return;
     }
 
     let cancelled = false;
-    setProactiveStatus(null);
 
     const load = async () => {
       try {
-        const [response, status] = await Promise.all([
-          window.electronAPI.workspace.listTaskProposals(selectedWorkspace.id),
-          window.electronAPI.workspace.getProactiveStatus(selectedWorkspace.id)
-        ]);
+        const response = await window.electronAPI.workspace.listTaskProposals(
+          selectedWorkspace.id,
+        );
         if (!cancelled) {
           setTaskProposals(response.proposals);
-          setProactiveStatus(status);
         }
       } catch (error) {
         if (!cancelled) {
@@ -2026,134 +1656,6 @@ function AppShellContent() {
     };
   }, [selectedWorkspace, selectedWorkspaceId]);
 
-  useEffect(() => {
-    if (!selectedWorkspaceId) {
-      return;
-    }
-    const trackedKeys = new Set<string>();
-    if (activeChatSessionId) {
-      trackedKeys.add(managedSessionKey(selectedWorkspaceId, activeChatSessionId));
-    }
-    for (const key of Object.keys(managedSessionRuntimesRef.current)) {
-      if (key.startsWith(`${selectedWorkspaceId}:`)) {
-        trackedKeys.add(key);
-      }
-    }
-    for (const key of trackedKeys) {
-      const separatorIndex = key.indexOf(":");
-      const sessionId = separatorIndex >= 0 ? key.slice(separatorIndex + 1) : "";
-      if (!sessionId) {
-        continue;
-      }
-      const runtimeState = runtimeSessions.find((item) => item.session_id === sessionId);
-      if (!runtimeState) {
-        continue;
-      }
-      void syncManagedSessionRuntime({
-        workspaceId: selectedWorkspaceId,
-        sessionId,
-        runtimeStatus: runtimeState.status,
-        currentInputId: runtimeState.current_input_id,
-        errorMessage: runtimeErrorDetail(runtimeState.last_error)
-      });
-    }
-  }, [activeChatSessionId, runtimeSessions, selectedWorkspaceId, syncManagedSessionRuntime]);
-
-  useEffect(() => {
-    const unsubscribe = window.electronAPI.workspace.onSessionStreamEvent((payload) => {
-      const key = managedStreamSessionKeyRef.current.get(payload.streamId);
-      if (!key) {
-        return;
-      }
-
-      if (payload.type === "done") {
-        managedStreamSessionKeyRef.current.delete(payload.streamId);
-        updateManagedSessionRuntime(key, (snapshot) =>
-          snapshot && snapshot.streamId === payload.streamId
-            ? {
-                ...snapshot,
-                streamId: null
-              }
-            : snapshot
-        );
-        return;
-      }
-
-      if (payload.type === "error") {
-        managedStreamSessionKeyRef.current.delete(payload.streamId);
-        updateManagedSessionRuntime(key, (snapshot) =>
-          snapshot
-            ? {
-                ...snapshot,
-                streamId: snapshot.streamId === payload.streamId ? null : snapshot.streamId,
-                runtimeStatus: normalizeRuntimeStatus(snapshot.runtimeStatus) === "IDLE" ? snapshot.runtimeStatus : "ERROR",
-                errorMessage: normalizeErrorMessage(payload.error || snapshot.errorMessage || "The agent stream failed.")
-              }
-            : snapshot
-        );
-        return;
-      }
-
-      const event = normalizeSessionOutputEvent(payload);
-      if (!event) {
-        return;
-      }
-
-      updateManagedSessionRuntime(key, (snapshot) => {
-        if (!snapshot) {
-          return snapshot;
-        }
-        if (snapshot.events.some((item) => item.id === event.id)) {
-          return snapshot;
-        }
-        const sameInput =
-          !snapshot.currentInputId || !event.input_id || event.input_id === snapshot.currentInputId;
-        const nextEvents = sameInput ? mergeSessionOutputEvents(snapshot.events, [event]) : snapshot.events;
-        let nextRuntimeStatus = snapshot.runtimeStatus;
-        let nextErrorMessage = snapshot.errorMessage;
-        let nextHistoryVersion = snapshot.historyVersion;
-        let awaitingHistoryHydration = snapshot.awaitingHistoryHydration;
-
-        if (event.event_type === "run_claimed" || event.event_type === "run_started") {
-          nextRuntimeStatus = "BUSY";
-        } else if (event.event_type === "run_waiting_user" || event.event_type === "awaiting_user_input") {
-          nextRuntimeStatus = "WAITING_USER";
-        } else if (event.event_type === "run_completed") {
-          nextRuntimeStatus = "IDLE";
-          nextHistoryVersion += 1;
-          awaitingHistoryHydration = true;
-        } else if (event.event_type === "run_failed") {
-          nextRuntimeStatus = "ERROR";
-          nextErrorMessage = runtimeErrorDetail(event.payload) || nextErrorMessage;
-          nextHistoryVersion += 1;
-          awaitingHistoryHydration = true;
-        }
-
-        return {
-          ...snapshot,
-          currentInputId: sameInput ? snapshot.currentInputId || event.input_id || null : snapshot.currentInputId,
-          events: nextEvents,
-          runtimeStatus: nextRuntimeStatus,
-          errorMessage: nextErrorMessage,
-          historyVersion: nextHistoryVersion,
-          awaitingHistoryHydration
-        };
-      });
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [updateManagedSessionRuntime]);
-
-  useEffect(() => {
-    return () => {
-      for (const key of Object.keys(managedSessionRuntimesRef.current)) {
-        void closeManagedSessionStream(key, "appshell_unmount");
-      }
-    };
-  }, [closeManagedSessionStream]);
-
   const handleDismissUpdate = () => {
     void window.electronAPI.appUpdate.dismiss(
       appUpdateStatus?.releaseTag ?? null,
@@ -2173,53 +1675,9 @@ function AppShellContent() {
     setOperationsDrawerOpen(true);
   };
 
-  const openChatSession = useCallback(
-    (sessionId: string) => {
-      if (!selectedWorkspaceId) {
-        return;
-      }
-
-      setActiveLeftRailItem("space");
-      setSpaceVisibility((previous) => ({
-        ...previous,
-        agent: true
-      }));
-      setAgentView({ type: "chat" });
-      setChatSessionRequest({
-        workspaceId: selectedWorkspaceId,
-        sessionId,
-        key: Date.now()
-      });
-      setChatFocusRequestKey((current) => current + 1);
-    },
-    [selectedWorkspaceId]
-  );
-
-  const handleOpenRunningSession = useCallback(
-    (sessionId: string) => {
-      openChatSession(sessionId);
-    },
-    [openChatSession]
-  );
-
-  const handleReturnToMainSession = useCallback(() => {
-    const mainSessionId = (selectedWorkspace?.main_session_id || "").trim();
-    if (!mainSessionId) {
-      return;
-    }
-    openChatSession(mainSessionId);
-  }, [openChatSession, selectedWorkspace?.main_session_id]);
-
   const handleLeftRailSelect = (item: LeftRailItem) => {
     if (item === "space") {
       setActiveLeftRailItem("space");
-      if (selectedWorkspaceId && activeChatSessionId) {
-        setChatSessionRequest({
-          workspaceId: selectedWorkspaceId,
-          sessionId: activeChatSessionId,
-          key: Date.now()
-        });
-      }
       if (agentView.type === "app") {
         setAgentView({ type: "chat" });
         void window.electronAPI.appSurface.hide();
@@ -2289,49 +1747,6 @@ function AppShellContent() {
     hasWorkspaces && spaceMode
       ? FIXED_SPACE_ORDER.filter((paneId) => spaceVisibility[paneId])
       : [];
-  const proactiveWorkspaceSetupStatus = useMemo<ProactiveStatusSnapshotPayload | null>(() => {
-    if (!selectedWorkspace) {
-      return null;
-    }
-    const workspaceStatus = (selectedWorkspace.status || "").trim().toLowerCase();
-    const recordedAt = selectedWorkspace.updated_at || selectedWorkspace.created_at || null;
-    if (workspaceStatus === "error") {
-      return {
-        state: "error",
-        detail: selectedWorkspace.error_message?.trim() || "Workspace provisioning failed.",
-        recorded_at: recordedAt
-      };
-    }
-    if (workspaceAppsReady) {
-      return {
-        state: "ready",
-        detail: `${selectedWorkspace.name.trim() || "Workspace"} apps and tools are ready.`,
-        recorded_at: recordedAt
-      };
-    }
-    if (workspaceStatus === "deleted") {
-      return {
-        state: "inactive",
-        detail: "This workspace is no longer active in the local runtime.",
-        recorded_at: recordedAt
-      };
-    }
-    return {
-      state: "setting_up",
-      detail:
-        workspaceBlockingReason ||
-        (isActivatingWorkspace || isLoadingInstalledApps
-          ? "Holaboss is still preparing workspace apps and capabilities."
-          : `Current workspace status: ${selectedWorkspace.status}.`),
-      recorded_at: recordedAt
-    };
-  }, [
-    isActivatingWorkspace,
-    isLoadingInstalledApps,
-    selectedWorkspace,
-    workspaceAppsReady,
-    workspaceBlockingReason
-  ]);
   const flexSpacePaneId = visibleSpacePaneIds.includes("agent")
     ? "agent"
     : (visibleSpacePaneIds[visibleSpacePaneIds.length - 1] ?? null);
@@ -2364,53 +1779,6 @@ function AppShellContent() {
       return true;
     });
   }, [outputEntries, runtimeOutputEntries]);
-  const runtimeStateBySessionId = useMemo(
-    () => new Map(runtimeSessions.map((item) => [item.session_id, item])),
-    [runtimeSessions]
-  );
-  const runningEntries = useMemo<OperationsRunningEntry[]>(() => {
-    const mainSessionId = (selectedWorkspace?.main_session_id || "").trim();
-    return agentSessions
-      .filter((session) => session.kind === "task_proposal")
-      .map((session) => {
-        const runtimeState = runtimeStateBySessionId.get(session.session_id);
-        const title = session.title?.trim() || session.session_id;
-        const detail =
-          session.parent_session_id && session.parent_session_id === mainSessionId
-            ? "Continues from main session."
-            : session.parent_session_id
-              ? `Parent session: ${session.parent_session_id}`
-              : "Proposal-created child session.";
-        return {
-          sessionId: session.session_id,
-          title,
-          detail,
-          status: runtimeState?.status || "IDLE",
-          createdAt: session.created_at,
-          updatedAt: runtimeState?.updated_at || session.updated_at,
-          isActive: agentView.type === "chat" && activeChatSessionId === session.session_id
-        };
-      })
-      .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
-  }, [activeChatSessionId, agentSessions, agentView.type, runtimeStateBySessionId, selectedWorkspace?.main_session_id]);
-  const activeSessionMeta = useMemo(
-    () => agentSessions.find((session) => session.session_id === activeChatSessionId) ?? null,
-    [activeChatSessionId, agentSessions]
-  );
-  const requestedChatSessionId =
-    chatSessionRequest?.workspaceId === selectedWorkspaceId ? chatSessionRequest.sessionId.trim() : "";
-  const managedChatSessionRuntime =
-    selectedWorkspaceId && (activeChatSessionId || requestedChatSessionId)
-      ? managedSessionRuntimes[managedSessionKey(selectedWorkspaceId, activeChatSessionId || requestedChatSessionId)] ?? null
-      : null;
-  const mainSessionId = (selectedWorkspace?.main_session_id || "").trim();
-  const showChildSessionBanner =
-    agentView.type === "chat" &&
-    !onboardingModeActive &&
-    Boolean(activeChatSessionId) &&
-    Boolean(mainSessionId) &&
-    activeChatSessionId !== mainSessionId;
-  const activeSessionBannerTitle = activeSessionMeta?.title?.trim() || activeChatSessionId || "Child session";
 
   const agentContent = useMemo(() => {
     if (!hasSelectedWorkspace) {
@@ -2418,44 +1786,16 @@ function AppShellContent() {
     }
 
     if (agentView.type === "chat") {
-      if (onboardingModeActive) {
-        return <OnboardingPane onOutputsChanged={() => void refreshRuntimeOutputs()} focusRequestKey={chatFocusRequestKey} />;
-      }
-      return (
-        <div className="flex h-full min-h-0 min-w-0 flex-col gap-3">
-          {showChildSessionBanner ? (
-            <div className="theme-subtle-surface relative z-10 shrink-0 rounded-[20px] border border-neon-green/24 px-4 py-3">
-              <div className="flex min-w-0 flex-col gap-3">
-                <div className="min-w-0 pr-20 lg:pr-28">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-neon-green/76">Child session</div>
-                  <div className="mt-1 truncate text-[13px] font-medium text-text-main">{activeSessionBannerTitle}</div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={handleReturnToMainSession}
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-[14px] border border-neon-green/40 bg-neon-green/10 px-3 text-[11px] text-neon-green transition hover:bg-neon-green/14"
-                  >
-                    <ArrowRight size={12} />
-                    <span>Back to main session</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <ChatPane
-              onOutputsChanged={() => void refreshRuntimeOutputs()}
-              focusRequestKey={chatFocusRequestKey}
-              sessionRequest={chatSessionRequest}
-              onActiveSessionChange={setActiveChatSessionId}
-              managedSessionRuntime={managedChatSessionRuntime}
-              onManagedSessionObserved={observeManagedSession}
-              onManagedHistoryHydrated={acknowledgeManagedHistoryHydration}
-              onManagedQueueSessionInput={queueManagedSessionInput}
-            />
-          </div>
-        </div>
+      return onboardingModeActive ? (
+        <OnboardingPane
+          onOutputsChanged={() => void refreshRuntimeOutputs()}
+          focusRequestKey={chatFocusRequestKey}
+        />
+      ) : (
+        <ChatPane
+          onOutputsChanged={() => void refreshRuntimeOutputs()}
+          focusRequestKey={chatFocusRequestKey}
+        />
       );
     }
 
@@ -2484,22 +1824,12 @@ function AppShellContent() {
   }, [
     activeApp,
     activeAppId,
-    activeChatSessionId,
-    activeSessionBannerTitle,
-    acknowledgeManagedHistoryHydration,
     agentView,
     chatFocusRequestKey,
-    chatSessionRequest,
-    handleReturnToMainSession,
     hasSelectedWorkspace,
     installedApps,
-    managedChatSessionRuntime,
     onboardingModeActive,
-    observeManagedSession,
-    queueManagedSessionInput,
     refreshRuntimeOutputs,
-    selectedWorkspaceId,
-    showChildSessionBanner
   ]);
 
   const spacePanes = useMemo(
@@ -2686,7 +2016,7 @@ function AppShellContent() {
   }, [clampPairedUtilityPaneWidths, clampUtilityPaneWidth]);
 
   return (
-    <main className="fixed inset-0 h-screen overflow-hidden text-text-main/90">
+    <main className="fixed inset-0 h-screen overflow-hidden text-foreground/90">
       <div className="theme-grid pointer-events-none absolute inset-0 bg-noise-grid bg-[size:22px_22px]" />
       <div className="theme-orb-primary pointer-events-none absolute -left-32 -top-32 h-80 w-80 rounded-full blur-3xl" />
       <div className="theme-orb-secondary pointer-events-none absolute -bottom-40 right-12 h-96 w-96 rounded-full blur-3xl" />
@@ -2710,6 +2040,15 @@ function AppShellContent() {
               onWorkspaceSwitcherVisibilityChange={setWorkspaceSwitcherOpen}
               onOpenMarketplace={() => handleLeftRailSelect("marketplace")}
               isMarketplaceActive={activeLeftRailItem === "marketplace"}
+              onOpenSettings={() => {
+                setSettingsDialogSection("settings");
+                setSettingsDialogOpen(true);
+              }}
+              onOpenAccount={() => {
+                setSettingsDialogSection("account");
+                setSettingsDialogOpen(true);
+              }}
+              onOpenExternalUrl={handleOpenExternalUrl}
             />
           </div>
         ) : null}
@@ -2731,7 +2070,7 @@ function AppShellContent() {
           <div
             className={`relative grid h-full min-h-0 gap-y-3 overflow-hidden transition-[grid-template-columns,column-gap] duration-300 ease-in-out ${
               showOperationsDrawer
-                ? "lg:grid-cols-[60px_minmax(0,1fr)_352px]"
+                ? "lg:grid-cols-[60px_minmax(0,1fr)_380px]"
                 : "lg:grid-cols-[60px_minmax(0,1fr)]"
             }`}
             style={{ columnGap: "0.5rem" }}
@@ -2787,7 +2126,7 @@ function AppShellContent() {
                                     }
                                     className="group relative z-10 flex w-4 shrink-0 cursor-col-resize touch-none items-center justify-center"
                                   >
-                                    <div className="pointer-events-none absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-full bg-panel-border/55 transition-all duration-150 group-hover:w-[2px] group-hover:bg-[rgba(247,90,84,0.5)]" />
+                                    <div className="pointer-events-none absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-full bg-border/55 transition-all duration-150 group-hover:w-[2px] group-hover:bg-[rgba(247,90,84,0.5)]" />
                                     <div className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[rgba(247,90,84,0.08)] opacity-0 transition duration-150 group-hover:opacity-100" />
                                   </div>
                                 ) : null}
@@ -2796,12 +2135,12 @@ function AppShellContent() {
                           })}
                         </div>
                       ) : (
-                        <section className="theme-shell flex h-full min-h-0 items-center justify-center rounded-[var(--theme-radius-card)] border border-panel-border/45 shadow-card">
+                        <section className="theme-shell flex h-full min-h-0 items-center justify-center rounded-[var(--radius-xl)] border border-border/45 shadow-lg">
                           <div className="max-w-[360px] px-6 text-center">
-                            <div className="text-[22px] font-medium tracking-[-0.03em] text-text-main">
+                            <div className="text-[22px] font-medium tracking-[-0.03em] text-foreground">
                               Turn on a space surface
                             </div>
-                            <div className="mt-3 text-[13px] leading-6 text-text-muted/78">
+                            <div className="mt-3 text-[13px] leading-6 text-muted-foreground/78">
                               Space keeps your files, browser, and agent panes
                               available together.
                             </div>
@@ -2827,12 +2166,12 @@ function AppShellContent() {
                         view={agentView.view}
                       />
                     ) : (
-                      <section className="theme-shell flex h-full min-h-0 items-center justify-center rounded-[var(--theme-radius-card)] border border-panel-border/45 shadow-card">
+                      <section className="theme-shell flex h-full min-h-0 items-center justify-center rounded-[var(--radius-xl)] border border-border/45 shadow-lg">
                         <div className="max-w-[360px] px-6 text-center">
-                          <div className="text-[22px] font-medium tracking-[-0.03em] text-text-main">
+                          <div className="text-[22px] font-medium tracking-[-0.03em] text-foreground">
                             Choose an app
                           </div>
-                          <div className="mt-3 text-[13px] leading-6 text-text-muted/78">
+                          <div className="mt-3 text-[13px] leading-6 text-muted-foreground/78">
                             Select a workspace app from the left rail to open
                             its dedicated screen.
                           </div>
@@ -2862,13 +2201,13 @@ function AppShellContent() {
 
             {spaceMode && spaceVisibility.agent ? (
               <div className="pointer-events-none absolute right-0 top-0 z-20 hidden lg:block">
-                <div className="pointer-events-auto inline-flex items-center gap-1 rounded-bl-[16px] rounded-tr-[var(--theme-radius-card)] border border-panel-border/50 border-r-0 border-t-0 bg-panel-bg/94 px-2 py-2 text-text-muted shadow-card backdrop-blur">
+                <div className="pointer-events-auto inline-flex items-center gap-1 rounded-bl-[16px] rounded-tr-[var(--radius-xl)] border border-border/50 border-r-0 border-t-0 bg-card/94 px-2 py-2 text-muted-foreground shadow-lg backdrop-blur">
                   {showOperationsDrawer ? (
                     <button
                       type="button"
                       onClick={() => toggleOperationsDrawer()}
                       aria-label="Hide right panel"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-[12px] border border-neon-green/45 bg-neon-green/10 text-neon-green transition-all duration-200 hover:border-neon-green/60 hover:bg-neon-green/14 active:scale-95"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-[12px] border border-primary/45 bg-primary/10 text-primary transition-all duration-200 hover:border-primary/60 hover:bg-primary/14 active:scale-95"
                     >
                       <PanelRightClose size={14} />
                     </button>
@@ -2878,7 +2217,7 @@ function AppShellContent() {
                         type="button"
                         onClick={() => openOperationsDrawerTab("inbox")}
                         aria-label="Open inbox panel"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-[12px] border border-panel-border/45 text-text-muted transition-all duration-200 hover:border-neon-green/45 hover:text-neon-green active:scale-95"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-[12px] border border-border/45 text-muted-foreground transition-all duration-200 hover:border-primary/45 hover:text-primary active:scale-95"
                       >
                         <Bell size={13} />
                       </button>
@@ -2886,7 +2225,7 @@ function AppShellContent() {
                         type="button"
                         onClick={() => openOperationsDrawerTab("running")}
                         aria-label="Open running panel"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-[12px] border border-panel-border/45 text-text-muted transition-all duration-200 hover:border-neon-green/45 hover:text-neon-green active:scale-95"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-[12px] border border-border/45 text-muted-foreground transition-all duration-200 hover:border-primary/45 hover:text-primary active:scale-95"
                       >
                         <Clock3 size={13} />
                       </button>
@@ -2894,7 +2233,7 @@ function AppShellContent() {
                         type="button"
                         onClick={() => openOperationsDrawerTab("outputs")}
                         aria-label="Open outputs panel"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-[12px] border border-panel-border/45 text-text-muted transition-all duration-200 hover:border-neon-green/45 hover:text-neon-green active:scale-95"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-[12px] border border-border/45 text-muted-foreground transition-all duration-200 hover:border-primary/45 hover:text-primary active:scale-95"
                       >
                         <ChevronRight size={13} />
                       </button>
@@ -2902,7 +2241,7 @@ function AppShellContent() {
                         type="button"
                         onClick={() => toggleOperationsDrawer()}
                         aria-label="Show right panel"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-[12px] border border-panel-border/45 text-text-muted transition-all duration-200 hover:border-neon-green/45 hover:text-neon-green active:scale-95"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-[12px] border border-border/45 text-muted-foreground transition-all duration-200 hover:border-primary/45 hover:text-primary active:scale-95"
                       >
                         <PanelRightOpen size={14} />
                       </button>
@@ -2922,14 +2261,14 @@ function AppShellContent() {
                   isTriggeringProposal={isTriggeringTaskProposal}
                   proposalStatusMessage={taskProposalStatusMessage}
                   proposalAction={proposalAction}
-                  runningEntries={runningEntries}
-                  isLoadingRunningEntries={isLoadingRunningEntries}
                   outputs={combinedOutputEntries}
                   installedApps={installedApps}
                   selectedOutputId={selectedOutputId}
                   onSelectOutput={setSelectedOutputId}
-                  onOpenRunningSession={handleOpenRunningSession}
                   onOpenOutput={handleOpenOutput}
+                  onRefreshProposals={() =>
+                    void refreshTaskProposals({ logErrors: true })
+                  }
                   onTriggerProposal={() => void triggerRemoteTaskProposal()}
                   onAcceptProposal={(proposal) =>
                     void acceptTaskProposal(proposal)
@@ -2938,11 +2277,6 @@ function AppShellContent() {
                     void dismissTaskProposal(proposal)
                   }
                   hasWorkspace={hasSelectedWorkspace}
-                  proactiveStatus={proactiveStatus}
-                  isLoadingProactiveStatus={isLoadingTaskProposals}
-                  workspaceSetupStatus={proactiveWorkspaceSetupStatus}
-                  workspaceName={selectedWorkspace?.name ?? null}
-                  workspaceId={selectedWorkspace?.id ?? null}
                 />
               </div>
             ) : null}
@@ -2959,12 +2293,6 @@ function AppShellContent() {
         themes={THEMES}
         onThemeChange={handleThemeChange}
         onOpenExternalUrl={handleOpenExternalUrl}
-        hasWorkspace={hasSelectedWorkspace}
-        selectedWorkspaceName={selectedWorkspace?.name ?? null}
-        selectedWorkspaceId={selectedWorkspace?.id ?? null}
-        proactiveStatus={proactiveStatus}
-        isLoadingProactiveStatus={isLoadingTaskProposals}
-        workspaceSetupStatus={proactiveWorkspaceSetupStatus}
       />
     </main>
   );
