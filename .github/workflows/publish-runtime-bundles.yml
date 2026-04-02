@@ -266,6 +266,19 @@ jobs:
           npm run build
           node scripts/run-electron-builder.mjs --projectDir "$PWD" --publish never --mac dmg --arm64
 
+      - name: Validate signed macOS app bundle
+        if: ${{ env.MAC_CERTIFICATE != '' && env.MAC_CERTIFICATE_PASSWORD != '' && env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
+        working-directory: desktop
+        run: |
+          app_path="$(find out/release -maxdepth 2 -name '*.app' -print -quit)"
+          if [ -z "${app_path}" ]; then
+            echo "no .app bundle found under desktop/out/release" >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "${app_path}"
+          spctl -a -vv -t exec "${app_path}"
+          xcrun stapler validate "${app_path}"
+
       - name: Upload macOS desktop DMG artifact
         uses: actions/upload-artifact@v7
         with:
