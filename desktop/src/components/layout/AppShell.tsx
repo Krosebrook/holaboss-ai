@@ -23,7 +23,6 @@ import { MarketplacePane } from "@/components/panes/MarketplacePane";
 import { OnboardingPane } from "@/components/panes/OnboardingPane";
 import { SkillsPane } from "@/components/panes/SkillsPane";
 import { UpdateReminder } from "@/components/ui/UpdateReminder";
-import { preferredSessionId } from "@/lib/sessionRouting";
 import {
   getWorkspaceAppDefinition,
   inferInstalledWorkspaceAppIdFromText,
@@ -140,6 +139,11 @@ type AgentView =
       resourceId?: string | null;
       htmlContent?: string | null;
     };
+
+type ChatSessionOpenRequest = {
+  sessionId: string;
+  requestKey: number;
+};
 
 function loadSpaceVisibility(): SpaceVisibilityState {
   return DEFAULT_SPACE_VISIBILITY;
@@ -539,6 +543,11 @@ function AppShellContent() {
     useState<LeftRailItem>("space");
   const [agentView, setAgentView] = useState<AgentView>({ type: "chat" });
   const [chatFocusRequestKey, setChatFocusRequestKey] = useState(1);
+  const [chatSessionOpenRequest, setChatSessionOpenRequest] =
+    useState<ChatSessionOpenRequest | null>(null);
+  const [activeChatSessionId, setActiveChatSessionId] = useState<
+    string | null
+  >(null);
   const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false);
   const [spaceVisibility, setSpaceVisibility] =
     useState<SpaceVisibilityState>(loadSpaceVisibility);
@@ -995,6 +1004,11 @@ function AppShellContent() {
     }));
   }, [spaceVisibility.agent]);
 
+  useEffect(() => {
+    setChatSessionOpenRequest(null);
+    setActiveChatSessionId(null);
+  }, [selectedWorkspaceId]);
+
   const appendOutputEntry = (
     entry: Omit<OperationsOutputEntry, "id" | "createdAt">,
   ) => {
@@ -1162,30 +1176,18 @@ function AppShellContent() {
     setProposalAction({ proposalId: proposal.proposal_id, action: "accept" });
     setTaskProposalStatusMessage("");
     try {
-      const runtimeStatesResponse =
-        await window.electronAPI.workspace.listRuntimeStates(
-          selectedWorkspaceId,
-        );
-      const targetSessionId = preferredSessionId(
-        selectedWorkspace,
-        runtimeStatesResponse.items,
-      );
-      if (!targetSessionId) {
-        throw new Error("No active session found for this workspace.");
-      }
-
-      await window.electronAPI.workspace.queueSessionInput({
-        text: proposal.task_prompt,
-        workspace_id: selectedWorkspaceId,
-        image_urls: null,
-        session_id: targetSessionId,
+      const proposalSessionId = `proposal-${crypto.randomUUID()}`;
+      const accepted = await window.electronAPI.workspace.acceptTaskProposal({
+        proposal_id: proposal.proposal_id,
+        task_name: proposal.task_name,
+        task_prompt: proposal.task_prompt,
+        session_id: proposalSessionId,
+        parent_session_id:
+          (selectedWorkspace.main_session_id || "").trim() || null,
         priority: 0,
         model: runtimeConfig?.defaultModel ?? null,
       });
-      await window.electronAPI.workspace.updateTaskProposalState(
-        proposal.proposal_id,
-        "accepted",
-      );
+      const targetSessionId = accepted.session.session_id;
 
       const detail = `Queued "${proposal.task_name}" into session ${targetSessionId}.`;
       const inferredAppId = inferInstalledWorkspaceAppIdFromText(
@@ -1390,6 +1392,24 @@ function AppShellContent() {
     });
   };
 
+  const handleOpenRunningSession = (sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      return;
+    }
+
+    setActiveLeftRailItem("space");
+    setSpaceVisibility((previous) => ({
+      ...previous,
+      agent: true,
+    }));
+    setAgentView({ type: "chat" });
+    setChatSessionOpenRequest((previous) => ({
+      sessionId: normalizedSessionId,
+      requestKey: (previous?.requestKey ?? 0) + 1,
+    }));
+  };
+
   const spaceMode = activeLeftRailItem === "space";
   const appMode = activeLeftRailItem === "app";
   const activeAppId =
@@ -1454,6 +1474,8 @@ function AppShellContent() {
         <ChatPane
           onOutputsChanged={() => void refreshRuntimeOutputs()}
           focusRequestKey={chatFocusRequestKey}
+          sessionOpenRequest={chatSessionOpenRequest}
+          onActiveSessionIdChange={setActiveChatSessionId}
         />
       );
     }
@@ -1947,21 +1969,24 @@ function AppShellContent() {
                   selectedOutputId={selectedOutputId}
                   onSelectOutput={setSelectedOutputId}
                   onOpenOutput={handleOpenOutput}
-                onRefreshProposals={() =>
-                  void refreshTaskProposals({ logErrors: true })
-                }
-                onTriggerProposal={() => void triggerRemoteTaskProposal()}
-                onProactiveTaskProposalsEnabledChange={(enabled) =>
-                  void handleProactiveTaskProposalsEnabledChange(enabled)
-                }
-                onAcceptProposal={(proposal) =>
-                  void acceptTaskProposal(proposal)
-                }
+                  onRefreshProposals={() =>
+                    void refreshTaskProposals({ logErrors: true })
+                  }
+                  onTriggerProposal={() => void triggerRemoteTaskProposal()}
+                  onProactiveTaskProposalsEnabledChange={(enabled) =>
+                    void handleProactiveTaskProposalsEnabledChange(enabled)
+                  }
+                  onAcceptProposal={(proposal) =>
+                    void acceptTaskProposal(proposal)
+                  }
                   onDismissProposal={(proposal) =>
                     void dismissTaskProposal(proposal)
                   }
+                  onOpenRunningSession={handleOpenRunningSession}
+                  activeRunningSessionId={activeChatSessionId}
                   hasWorkspace={hasSelectedWorkspace}
                   selectedWorkspaceId={selectedWorkspaceId}
+                  mainSessionId={(selectedWorkspace?.main_session_id || "").trim() || null}
                 />
               </div>
             ) : null}
