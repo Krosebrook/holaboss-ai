@@ -543,6 +543,10 @@ function AppShellContent() {
     useState<LeftRailItem>("space");
   const [agentView, setAgentView] = useState<AgentView>({ type: "chat" });
   const [chatFocusRequestKey, setChatFocusRequestKey] = useState(1);
+  const [chatSessionJumpRequest, setChatSessionJumpRequest] = useState<{
+    sessionId: string;
+    requestKey: number;
+  } | null>(null);
   const [chatSessionOpenRequest, setChatSessionOpenRequest] =
     useState<ChatSessionOpenRequest | null>(null);
   const [activeChatSessionId, setActiveChatSessionId] = useState<
@@ -860,11 +864,26 @@ function AppShellContent() {
         ) {
           return;
         }
-        setActiveLeftRailItem("space");
-        setSpaceVisibility((previous) => ({
-          ...previous,
-          browser: true,
-        }));
+
+        const openBrowserPane = () => {
+          setActiveLeftRailItem("space");
+          setSpaceVisibility((previous) => ({
+            ...previous,
+            browser: true,
+          }));
+        };
+
+        const requestedUrl =
+          typeof payload.url === "string" ? payload.url.trim() : "";
+        if (requestedUrl) {
+          openBrowserPane();
+          void window.electronAPI.browser
+            .setActiveWorkspace(payload.workspaceId ?? selectedWorkspaceId ?? null)
+            .then(() => window.electronAPI.browser.navigate(requestedUrl))
+            .catch(() => undefined);
+          return;
+        }
+        openBrowserPane();
       },
     );
 
@@ -935,6 +954,34 @@ function AppShellContent() {
     void window.electronAPI.ui.openExternalUrl(url);
   }, []);
 
+  const revealBrowserPane = useCallback(() => {
+    setActiveLeftRailItem("space");
+    setSpaceVisibility((previous) => ({
+      ...previous,
+      browser: true,
+    }));
+  }, []);
+
+  const handleOpenLinkInAppBrowser = useCallback(
+    (url: string, workspaceIdOverride?: string | null) => {
+      const normalizedUrl = url.trim();
+      if (!normalizedUrl) {
+        return;
+      }
+
+      revealBrowserPane();
+      const targetWorkspaceId =
+        workspaceIdOverride !== undefined
+          ? workspaceIdOverride
+          : selectedWorkspaceId || null;
+      void window.electronAPI.browser
+        .setActiveWorkspace(targetWorkspaceId)
+        .then(() => window.electronAPI.browser.navigate(normalizedUrl))
+        .catch(() => undefined);
+    },
+    [revealBrowserPane, selectedWorkspaceId],
+  );
+
   const handleOpenCreateWorkspacePanel = useCallback(() => {
     setCreateWorkspacePanelAnchorWorkspaceId(selectedWorkspaceId || "");
     setCreateWorkspacePanelOpen(true);
@@ -961,6 +1008,10 @@ function AppShellContent() {
     createWorkspacePanelOpen,
     selectedWorkspaceId,
   ]);
+
+  useEffect(() => {
+    setChatSessionJumpRequest(null);
+  }, [selectedWorkspaceId]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -1367,6 +1418,25 @@ function AppShellContent() {
     });
   };
 
+  const handleOpenAutomationRunSession = useCallback((sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId) {
+      return;
+    }
+
+    setActiveLeftRailItem("space");
+    setSpaceVisibility((previous) => ({
+      ...previous,
+      agent: true,
+    }));
+    setAgentView({ type: "chat" });
+    setChatSessionJumpRequest({
+      sessionId: normalizedSessionId,
+      requestKey: Date.now(),
+    });
+    setChatFocusRequestKey((current) => current + 1);
+  }, []);
+
   const handleOpenOutput = (entry: OperationsOutputEntry) => {
     if (entry.renderer.type === "app") {
       setActiveLeftRailItem("app");
@@ -1474,6 +1544,9 @@ function AppShellContent() {
         <ChatPane
           onOutputsChanged={() => void refreshRuntimeOutputs()}
           focusRequestKey={chatFocusRequestKey}
+          onOpenLinkInBrowser={handleOpenLinkInAppBrowser}
+          sessionJumpSessionId={chatSessionJumpRequest?.sessionId ?? null}
+          sessionJumpRequestKey={chatSessionJumpRequest?.requestKey ?? 0}
           sessionOpenRequest={chatSessionOpenRequest}
           onActiveSessionIdChange={setActiveChatSessionId}
         />
@@ -1506,8 +1579,10 @@ function AppShellContent() {
     activeApp,
     activeAppId,
     agentView,
+    chatSessionJumpRequest,
     chatFocusRequestKey,
     hasSelectedWorkspace,
+    handleOpenLinkInAppBrowser,
     installedApps,
     onboardingModeActive,
     refreshRuntimeOutputs,
@@ -1799,7 +1874,7 @@ function AppShellContent() {
                             return (
                               <div key={pane.id} className="contents">
                                 <div
-                                  className={`relative min-h-0 min-w-0 overflow-hidden ${pane.flex ? "flex-1" : "shrink-0"}`}
+                                  className={`relative min-h-0 min-w-0 overflow-hidden rounded-[var(--radius-xl)] ${pane.flex ? "flex-1" : "shrink-0"}`}
                                   style={
                                     pane.flex
                                       ? undefined
@@ -1847,7 +1922,7 @@ function AppShellContent() {
                     </div>
                   </div>
                 ) : activeLeftRailItem === "app" ? (
-                  <div className="h-full min-h-0 overflow-hidden">
+                  <div className="h-full min-h-0 overflow-hidden rounded-[var(--radius-xl)]">
                     {agentView.type === "app" ? (
                       <AppSurfacePane
                         appId={agentView.appId}
@@ -1877,19 +1952,21 @@ function AppShellContent() {
                     )}
                   </div>
                 ) : activeLeftRailItem === "automations" ? (
-                  <div className="h-full min-h-0 overflow-hidden">
-                    <AutomationsPane />
+                  <div className="h-full min-h-0 overflow-hidden rounded-[var(--radius-xl)]">
+                    <AutomationsPane
+                      onOpenRunSession={handleOpenAutomationRunSession}
+                    />
                   </div>
                 ) : activeLeftRailItem === "integrations" ? (
-                  <div className="h-full min-h-0 overflow-hidden">
+                  <div className="h-full min-h-0 overflow-hidden rounded-[var(--radius-xl)]">
                     <IntegrationsPane />
                   </div>
                 ) : activeLeftRailItem === "marketplace" ? (
-                  <div className="h-full min-h-0 overflow-hidden">
+                  <div className="h-full min-h-0 overflow-hidden rounded-[var(--radius-xl)]">
                     <MarketplacePane />
                   </div>
                 ) : (
-                  <div className="h-full min-h-0 overflow-hidden">
+                  <div className="h-full min-h-0 overflow-hidden rounded-[var(--radius-xl)]">
                     <SkillsPane />
                   </div>
                 )}
