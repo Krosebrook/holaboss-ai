@@ -47,7 +47,6 @@ interface TopTabsBarProps {
   onOpenSettings?: () => void;
   onOpenAccount?: () => void;
   onOpenBilling?: () => void;
-  onOpenModelProviders?: () => void;
   onOpenExternalUrl?: (url: string) => void;
   onPublish?: () => void;
 }
@@ -61,12 +60,14 @@ export function TopTabsBar({
   onOpenSettings,
   onOpenAccount,
   onOpenBilling,
-  onOpenModelProviders,
   onOpenExternalUrl,
   onPublish,
 }: TopTabsBarProps) {
-  const { overview, isLoading: isBillingLoading, isLowBalance } =
-    useDesktopBilling();
+  const {
+    overview,
+    isLoading: isBillingLoading,
+    isLowBalance,
+  } = useDesktopBilling();
   const userButtonRef = useRef<HTMLButtonElement | null>(null);
   const workspaceSwitcherRef = useRef<HTMLDivElement | null>(null);
   const workspaceSwitcherButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -224,7 +225,7 @@ export function TopTabsBar({
           <img
             src={holabossLogoUrl}
             alt="Holaboss"
-            className="size-10 shrink-0"
+            className="size-9 shrink-0 rounded-lg border border-border p-1"
           />
           <div
             ref={workspaceSwitcherRef}
@@ -287,24 +288,34 @@ export function TopTabsBar({
           <DropdownMenu>
             <DropdownMenuTrigger
               ref={userButtonRef}
-              className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-input bg-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              render={<Button variant="outline" size="icon-lg" />}
             >
-              <User2 size={15} />
+              <User2 />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={8} className="w-64">
+            <DropdownMenuContent align="end" sideOffset={8} className="w-56">
               <DropdownMenuGroup>
-                <DropdownMenuLabel className="px-3 py-2">
-                  <div className="text-sm font-medium text-foreground">
-                    Desktop Status
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {runtimeStatus?.status === "running"
-                      ? "Runtime connected and running."
-                      : runtimeStatus?.status === "starting"
-                        ? "Runtime starting..."
-                        : runtimeStatus?.status === "error"
-                          ? "Runtime error."
-                          : "Waiting for runtime..."}
+                <DropdownMenuLabel className="px-3 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      className={`size-2.5 shrink-0 rounded-full ${
+                        runtimeStatus?.status === "running"
+                          ? "bg-emerald-500"
+                          : runtimeStatus?.status === "starting"
+                            ? "animate-pulse bg-amber-400"
+                            : runtimeStatus?.status === "error"
+                              ? "bg-destructive"
+                              : "bg-muted-foreground/50"
+                      }`}
+                    />
+                    <span className="text-sm font-medium text-foreground">
+                      {runtimeStatus?.status === "running"
+                        ? "Runtime active"
+                        : runtimeStatus?.status === "starting"
+                          ? "Runtime starting"
+                          : runtimeStatus?.status === "error"
+                            ? "Runtime error"
+                            : "Runtime offline"}
+                    </span>
                   </div>
                 </DropdownMenuLabel>
               </DropdownMenuGroup>
@@ -317,13 +328,6 @@ export function TopTabsBar({
                 <DropdownMenuItem onClick={() => onOpenSettings?.()}>
                   <Settings />
                   Settings
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => onOpenModelProviders?.()}>
-                  <Settings />
-                  Model providers
                 </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
@@ -371,7 +375,10 @@ export function TopTabsBar({
               }}
             >
               <div className="relative mb-2">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Search
+                  size={13}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
                 <Input
                   value={workspaceQuery}
                   onChange={(event) => setWorkspaceQuery(event.target.value)}
