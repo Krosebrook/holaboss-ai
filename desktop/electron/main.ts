@@ -2687,11 +2687,17 @@ async function readRuntimeConfigFile(): Promise<Record<string, string>> {
       holabossIntegration.user_id as string | undefined,
       legacyPayload.user_id as string | undefined,
     );
-    const sandboxId = runtimeFirstNonEmptyString(
-      runtimePayload.sandbox_id as string | undefined,
+    const bindingSandboxId = runtimeFirstNonEmptyString(
       holabossIntegration.sandbox_id as string | undefined,
       legacyPayload.sandbox_id as string | undefined,
     );
+    const sandboxId =
+      authToken && bindingSandboxId
+        ? bindingSandboxId
+        : runtimeFirstNonEmptyString(
+            runtimePayload.sandbox_id as string | undefined,
+            bindingSandboxId,
+          );
     const modelProxyBaseUrl = runtimeFirstNonEmptyString(
       holabossProvider.base_url as string | undefined,
       legacyPayload.model_proxy_base_url as string | undefined,
@@ -3204,6 +3210,13 @@ function canUsePersistedRuntimeBindingWithoutAuth(
 async function writeRuntimeConfigFile(update: RuntimeConfigUpdatePayload) {
   const current = await readRuntimeConfigFile();
   const currentDocument = await readRuntimeConfigDocument();
+  const runtimePayload = runtimeConfigObject(currentDocument.runtime);
+  const providersPayload = runtimeConfigObject(currentDocument.providers);
+  const integrationsPayload = runtimeConfigObject(currentDocument.integrations);
+  const holabossIntegration = runtimeConfigObject(integrationsPayload.holaboss);
+  const holabossProvider = runtimeConfigObject(
+    providersPayload[RUNTIME_HOLABOSS_PROVIDER_ID],
+  );
   const next = { ...current };
   const entries: Array<[keyof RuntimeConfigUpdatePayload, string]> = [
     ["authToken", "auth_token"],
@@ -3237,10 +3250,51 @@ async function writeRuntimeConfigFile(update: RuntimeConfigUpdatePayload) {
     delete next.model_proxy_api_key;
   }
 
+  const assignOrDelete = (
+    target: Record<string, unknown>,
+    key: string,
+    value: string | undefined,
+  ) => {
+    const normalized = runtimeConfigField(value);
+    if (normalized) {
+      target[key] = normalized;
+    } else {
+      delete target[key];
+    }
+  };
+
+  assignOrDelete(holabossIntegration, "auth_token", next.auth_token);
+  assignOrDelete(holabossIntegration, "user_id", next.user_id);
+  assignOrDelete(holabossIntegration, "sandbox_id", next.sandbox_id);
+  assignOrDelete(holabossProvider, "api_key", next.auth_token);
+  assignOrDelete(holabossProvider, "base_url", next.model_proxy_base_url);
+  assignOrDelete(runtimePayload, "sandbox_id", next.sandbox_id);
+  assignOrDelete(runtimePayload, "default_model", next.default_model);
+
+  if (
+    Object.keys(holabossProvider).length > 0 &&
+    !runtimeConfigField(holabossProvider.kind as string | undefined)
+  ) {
+    holabossProvider.kind = RUNTIME_PROVIDER_KIND_HOLABOSS_PROXY;
+  }
+  if (Object.keys(holabossIntegration).length > 0) {
+    integrationsPayload.holaboss = holabossIntegration;
+  } else {
+    delete integrationsPayload.holaboss;
+  }
+  if (Object.keys(holabossProvider).length > 0) {
+    providersPayload[RUNTIME_HOLABOSS_PROVIDER_ID] = holabossProvider;
+  } else {
+    delete providersPayload[RUNTIME_HOLABOSS_PROVIDER_ID];
+  }
+
   const configPath = runtimeConfigPath();
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   const nextDocument = {
     ...currentDocument,
+    runtime: runtimePayload,
+    providers: providersPayload,
+    integrations: integrationsPayload,
     holaboss: next,
   };
   await fs.writeFile(
