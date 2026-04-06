@@ -2,10 +2,11 @@ import archiver from "archiver";
 import { existsSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import { createWriteStream } from "node:fs";
-import path from "node:path";
-import { Writable } from "node:stream";
 import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
+import type { IncomingMessage } from "node:http";
+import path from "node:path";
+import { Writable } from "node:stream";
 
 // ---------------------------------------------------------------------------
 // Ignore patterns — mirrors backend's ignore_rules.py
@@ -175,6 +176,49 @@ function isHbIgnored(relPath: string, hbPatterns: string[]): boolean {
   return false;
 }
 
+function parseSignedHeaderNames(url: string): string[] {
+  const signedHeaders = new URL(url).searchParams.get("X-Amz-SignedHeaders") ??
+    new URL(url).searchParams.get("x-amz-signedheaders") ??
+    "";
+  return signedHeaders
+    .split(";")
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value.length > 0);
+}
+
+export function buildPresignedUploadHeaders(
+  url: string,
+  dataLength: number,
+): Record<string, string> {
+  const signedHeaders = parseSignedHeaderNames(url);
+  const headers: Record<string, string> = {
+    "Content-Length": String(dataLength),
+  };
+
+  if (signedHeaders.length === 0 || signedHeaders.includes("content-type")) {
+    headers["Content-Type"] = "application/zip";
+  }
+
+  return headers;
+}
+
+export function buildPresignedUploadError(
+  url: string,
+  status: number,
+  responseBody: string,
+): string {
+  const signedHeaders = parseSignedHeaderNames(url);
+  const uploadHost = new URL(url).host;
+  const signedHeadersLabel = signedHeaders.length > 0
+    ? signedHeaders.join(", ")
+    : "(not provided)";
+  const detail = responseBody.trim().slice(0, 500);
+
+  return detail
+    ? `Presigned URL upload failed with status ${status}. Host: ${uploadHost}. Signed headers: ${signedHeadersLabel}. Response: ${detail}`
+    : `Presigned URL upload failed with status ${status}. Host: ${uploadHost}. Signed headers: ${signedHeadersLabel}`;
+}
+
 /**
  * Determine whether a file should be included in the archive.
  */
@@ -297,6 +341,11 @@ export async function packageWorkspace(
   });
 
   archive.pipe(bufferWritable);
+  const archiveCompleted = new Promise<void>((resolve, reject) => {
+    bufferWritable.on("finish", resolve);
+    bufferWritable.on("error", reject);
+    archive.on("error", reject);
+  });
 
   // Write manifest.json as first entry
   const manifestJson = JSON.stringify(manifest, null, 2);
@@ -309,13 +358,7 @@ export async function packageWorkspace(
   }
 
   await archive.finalize();
-
-  // Wait for the writable to finish
-  await new Promise<void>((resolve, reject) => {
-    bufferWritable.on("finish", resolve);
-    bufferWritable.on("error", reject);
-    archive.on("error", reject);
-  });
+  await archiveCompleted;
 
   const archiveBuffer = Buffer.concat(chunks);
   return {
@@ -332,9 +375,12 @@ export async function uploadToPresignedUrl(
   data: Buffer,
   timeoutMs = 120_000,
 ): Promise<void> {
-  const parsed = new URL(url);
-  const isHttps = parsed.protocol === "https:";
-  const requester = isHttps ? httpsRequest : httpRequest;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(`Upload timed out after ${timeoutMs}ms`));
+  }, timeoutMs);
+
+  const requester = url.startsWith("https") ? httpsRequest : httpRequest;
 
   await new Promise<void>((resolve, reject) => {
     const req = requester(
@@ -347,7 +393,7 @@ export async function uploadToPresignedUrl(
         },
         timeout: timeoutMs,
       },
-      (res) => {
+      (res: IncomingMessage) => {
         // Drain response body
         res.resume();
         res.on("end", () => {

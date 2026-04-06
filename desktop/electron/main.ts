@@ -263,7 +263,12 @@ interface BrowserAnchorBoundsPayload {
   height: number;
 }
 
-type UiSettingsPaneSection = "account" | "billing" | "providers" | "settings" | "about";
+type UiSettingsPaneSection =
+  | "account"
+  | "billing"
+  | "providers"
+  | "settings"
+  | "about";
 
 interface AddressSuggestionPayload {
   id: string;
@@ -2666,7 +2671,9 @@ async function readRuntimeConfigFile(): Promise<Record<string, string>> {
     const runtimePayload = runtimeConfigObject(parsedRecord.runtime);
     const providersPayload = runtimeConfigObject(parsedRecord.providers);
     const integrationsPayload = runtimeConfigObject(parsedRecord.integrations);
-    const holabossIntegration = runtimeConfigObject(integrationsPayload.holaboss);
+    const holabossIntegration = runtimeConfigObject(
+      integrationsPayload.holaboss,
+    );
     const holabossProvider = runtimeConfigObject(
       providersPayload[RUNTIME_HOLABOSS_PROVIDER_ID],
     );
@@ -3029,7 +3036,11 @@ async function handleDesktopBrowserServiceRequest(
 
       emitBrowserState(targetWorkspaceId);
       await persistBrowserWorkspace(targetWorkspaceId);
-      writeBrowserServiceJson(response, 200, browserWorkspaceSnapshot(targetWorkspaceId));
+      writeBrowserServiceJson(
+        response,
+        200,
+        browserWorkspaceSnapshot(targetWorkspaceId),
+      );
       return;
     }
 
@@ -3484,7 +3495,10 @@ function runtimeProviderModelGroups(
   const integrationsPayload = runtimeConfigObject(document.integrations);
   const holabossIntegration = runtimeConfigObject(integrationsPayload.holaboss);
 
-  const providers = new Map<string, { id: string; kind: string; label: string }>();
+  const providers = new Map<
+    string,
+    { id: string; kind: string; label: string }
+  >();
   for (const [providerId, rawProvider] of Object.entries(providersPayload)) {
     const canonicalProviderId = canonicalRuntimeProviderId(providerId);
     const providerPayload = runtimeConfigObject(rawProvider);
@@ -3544,10 +3558,16 @@ function runtimeProviderModelGroups(
     });
   }
 
-  const groupedModels = new Map<string, Map<string, RuntimeProviderModelPayload>>();
+  const groupedModels = new Map<
+    string,
+    Map<string, RuntimeProviderModelPayload>
+  >();
   const ensureProviderGroup = (providerId: string) => {
     if (!groupedModels.has(providerId)) {
-      groupedModels.set(providerId, new Map<string, RuntimeProviderModelPayload>());
+      groupedModels.set(
+        providerId,
+        new Map<string, RuntimeProviderModelPayload>(),
+      );
     }
     return groupedModels.get(providerId)!;
   };
@@ -3577,7 +3597,10 @@ function runtimeProviderModelGroups(
       });
     }
   };
-  const seedLegacyHolabossProxyModels = (providerId: string, defaultModelToken: string) => {
+  const seedLegacyHolabossProxyModels = (
+    providerId: string,
+    defaultModelToken: string,
+  ) => {
     if (!providers.has(providerId)) {
       providers.set(providerId, {
         id: providerId,
@@ -3648,7 +3671,8 @@ function runtimeProviderModelGroups(
   }
 
   if (hasLegacyProxyBinding) {
-    const legacyProxyProviderId = runtimeDefaultProvider || RUNTIME_HOLABOSS_PROVIDER_ID;
+    const legacyProxyProviderId =
+      runtimeDefaultProvider || RUNTIME_HOLABOSS_PROVIDER_ID;
     const hasExplicitHolabossModels =
       (groupedModels.get(legacyProxyProviderId)?.size ?? 0) > 0;
     if (!hasExplicitHolabossModels) {
@@ -3666,7 +3690,8 @@ function runtimeProviderModelGroups(
   ]);
   for (const providerId of providerIds) {
     const modelMap =
-      groupedModels.get(providerId) ?? new Map<string, RuntimeProviderModelPayload>();
+      groupedModels.get(providerId) ??
+      new Map<string, RuntimeProviderModelPayload>();
     const provider = providers.get(providerId);
     groups.push({
       providerId,
@@ -3680,7 +3705,9 @@ function runtimeProviderModelGroups(
 
 function isHolabossProviderAlias(providerId: string): boolean {
   const normalized = providerId.trim().toLowerCase();
-  return RUNTIME_HOLABOSS_PROVIDER_ALIASES.some((alias) => alias === normalized);
+  return RUNTIME_HOLABOSS_PROVIDER_ALIASES.some(
+    (alias) => alias === normalized,
+  );
 }
 
 function runtimeConfigRestartRequired(
@@ -3717,9 +3744,7 @@ async function restartEmbeddedRuntimeIfNeeded(
 
 function withRuntimeLifecycleLock<T>(work: () => Promise<T>): Promise<T> {
   const run = runtimeLifecycleChain.then(work, work);
-  runtimeLifecycleChain = run
-    .then(() => undefined)
-    .catch(() => undefined);
+  runtimeLifecycleChain = run.then(() => undefined).catch(() => undefined);
   return run;
 }
 
@@ -3749,7 +3774,8 @@ async function getRuntimeConfig(): Promise<RuntimeConfigPayload> {
   const document = await readRuntimeConfigDocument();
   return {
     configPath,
-    loadedFromFile: Object.keys(document).length > 0 || Object.keys(loaded).length > 0,
+    loadedFromFile:
+      Object.keys(document).length > 0 || Object.keys(loaded).length > 0,
     authTokenPresent: Boolean(runtimeModelProxyApiKeyFromConfig(loaded)),
     userId: loaded.user_id ?? null,
     sandboxId: loaded.sandbox_id ?? null,
@@ -3818,7 +3844,9 @@ async function setRuntimeConfigDocument(
   return config;
 }
 
-function runtimeUserProfileNameSourceFromApi(value: unknown): RuntimeUserProfileNameSource | null {
+function runtimeUserProfileNameSourceFromApi(
+  value: unknown,
+): RuntimeUserProfileNameSource | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (normalized === "manual" || normalized === "agent") {
     return normalized;
@@ -3844,7 +3872,9 @@ function runtimeUserProfileNameSourceToApi(
   return value;
 }
 
-function runtimeUserProfilePayloadFromApi(value: unknown): RuntimeUserProfilePayload {
+function runtimeUserProfilePayloadFromApi(
+  value: unknown,
+): RuntimeUserProfilePayload {
   const record =
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)
@@ -3854,7 +3884,10 @@ function runtimeUserProfilePayloadFromApi(value: unknown): RuntimeUserProfilePay
       typeof record.profile_id === "string" && record.profile_id.trim()
         ? record.profile_id
         : "default",
-    name: typeof record.name === "string" && record.name.trim() ? record.name : null,
+    name:
+      typeof record.name === "string" && record.name.trim()
+        ? record.name
+        : null,
     nameSource: runtimeUserProfileNameSourceFromApi(record.name_source),
     createdAt:
       typeof record.created_at === "string" && record.created_at.trim()
@@ -3873,7 +3906,10 @@ async function runtimeApiRequest<T>(
 ): Promise<T> {
   const status = await ensureRuntimeReady();
   const baseUrl = status.url ?? runtimeBaseUrl();
-  const targetUrl = new URL(pathname, `${baseUrl.replace(/\/+$/, "")}/`).toString();
+  const targetUrl = new URL(
+    pathname,
+    `${baseUrl.replace(/\/+$/, "")}/`,
+  ).toString();
   const response = await fetch(targetUrl, init);
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -4248,20 +4284,15 @@ async function billingFetch<T>(path: string, input?: unknown): Promise<T> {
     throw new Error("Not authenticated — sign in first.");
   }
 
-  const response = await fetch(
-    `${AUTH_BASE_URL}${path}`,
-    {
-      method: "POST",
-      headers: {
-        Cookie: cookieHeader,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(
-        input === undefined ? {} : { json: input },
-      ),
+  const response = await fetch(`${AUTH_BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      Cookie: cookieHeader,
+      Accept: "application/json",
+      "Content-Type": "application/json",
     },
-  );
+    body: JSON.stringify(input === undefined ? {} : { json: input }),
+  });
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
@@ -4331,8 +4362,9 @@ async function getDesktopBillingOverview(): Promise<DesktopBillingOverviewPayloa
     subscription && !subscription.cancelAtPeriodEnd
       ? subscription.currentPeriodEnd
       : null;
-  const expiresAt =
-    subscription?.cancelAtPeriodEnd ? subscription.currentPeriodEnd : null;
+  const expiresAt = subscription?.cancelAtPeriodEnd
+    ? subscription.currentPeriodEnd
+    : null;
   const creditsBalance = quota.balance;
 
   return {
@@ -4445,9 +4477,8 @@ function sessionQueueRequiresRuntimeBinding(
   config: Record<string, string>,
   selectedModelToken: string | null | undefined,
 ): boolean {
-  const explicitProviderId = configuredProviderIdForRuntimeModelToken(
-    selectedModelToken,
-  );
+  const explicitProviderId =
+    configuredProviderIdForRuntimeModelToken(selectedModelToken);
   if (explicitProviderId) {
     return isHolabossProviderAlias(explicitProviderId);
   }
@@ -4480,7 +4511,9 @@ function shouldForceRuntimeBindingRefresh(userId: string): boolean {
   );
 }
 
-function hasRecentTransientRuntimeBindingRefreshFailure(userId: string): boolean {
+function hasRecentTransientRuntimeBindingRefreshFailure(
+  userId: string,
+): boolean {
   if (!userId) {
     return false;
   }
@@ -4663,9 +4696,8 @@ async function ensureRuntimeBindingReadyForWorkspaceFlow(
     currentConfig,
     userId,
   );
-  const hasExistingBindingMaterial = runtimeConfigHasBindingMaterial(
-    currentConfig,
-  );
+  const hasExistingBindingMaterial =
+    runtimeConfigHasBindingMaterial(currentConfig);
   const canUseExistingBindingOnRefreshFailure =
     hasExistingBindingMaterial &&
     !bindingNeedsReplacement &&
@@ -4901,11 +4933,15 @@ function gatewayBaseUrl(service: string): string {
 }
 
 function projectsBaseUrl() {
-  return AUTH_BASE_URL ? gatewayBaseUrl("projects") : DEFAULT_PROJECTS_URL.replace(/\/+$/, "");
+  return AUTH_BASE_URL
+    ? gatewayBaseUrl("projects")
+    : DEFAULT_PROJECTS_URL.replace(/\/+$/, "");
 }
 
 function marketplaceBaseUrl() {
-  return AUTH_BASE_URL ? gatewayBaseUrl("marketplace") : DEFAULT_MARKETPLACE_URL.replace(/\/+$/, "");
+  return AUTH_BASE_URL
+    ? gatewayBaseUrl("marketplace")
+    : DEFAULT_MARKETPLACE_URL.replace(/\/+$/, "");
 }
 
 async function controlPlaneHeaders(
@@ -4922,7 +4958,9 @@ async function controlPlaneHeaders(
 }
 
 function proactiveBaseUrl() {
-  return AUTH_BASE_URL ? gatewayBaseUrl("proactive") : DEFAULT_PROACTIVE_URL.replace(/\/+$/, "");
+  return AUTH_BASE_URL
+    ? gatewayBaseUrl("proactive")
+    : DEFAULT_PROACTIVE_URL.replace(/\/+$/, "");
 }
 
 function embeddedRuntimeStartupConfigError() {
@@ -5376,10 +5414,7 @@ async function getProactiveStatus(
           LIMIT 1
         `,
       )
-      .get(
-        `%workspace_id=${normalizedWorkspaceId}%`,
-        `%${correlationId}%`,
-      ) as
+      .get(`%workspace_id=${normalizedWorkspaceId}%`, `%${correlationId}%`) as
       | {
           outcome?: string | null;
           detail?: string | null;
@@ -5433,13 +5468,16 @@ async function getProactiveStatus(
   } else if (runtimeStatus.status === "error") {
     bridge = {
       state: "error",
-      detail: runtimeStatus.lastError?.trim() || "Embedded runtime reported an error.",
+      detail:
+        runtimeStatus.lastError?.trim() ||
+        "Embedded runtime reported an error.",
       recorded_at: null,
     };
   } else {
     bridge = {
       state: "inactive",
-      detail: runtimeStatus.lastError?.trim() || "Embedded runtime is not running.",
+      detail:
+        runtimeStatus.lastError?.trim() || "Embedded runtime is not running.",
       recorded_at: null,
     };
   }
@@ -5448,25 +5486,30 @@ async function getProactiveStatus(
   let deliverySummary = "No proactive activity recorded yet.";
   let deliveryDetail: string | null = null;
   const heartbeatAgeSeconds = secondsSinceIso(heartbeat.recorded_at);
-  const heartbeatSettled = heartbeatAgeSeconds !== null && heartbeatAgeSeconds >= 120;
+  const heartbeatSettled =
+    heartbeatAgeSeconds !== null && heartbeatAgeSeconds >= 120;
   if (proposalCount > 0) {
     deliveryState = "delivered";
     deliverySummary = `${proposalCount} proactive proposal${proposalCount === 1 ? "" : "s"} available in this runtime.`;
   } else if (heartbeat.state === "published" && bridge.state === "error") {
     deliveryState = "blocked";
-    deliverySummary = "Heartbeat was sent, but proposal delivery into this runtime is blocked.";
+    deliverySummary =
+      "Heartbeat was sent, but proposal delivery into this runtime is blocked.";
     deliveryDetail = bridge.detail;
   } else if (heartbeat.state === "published" && !heartbeatSettled) {
     deliveryState = "analyzing";
-    deliverySummary = "Heartbeat was sent. Remote proactive analysis is still in progress.";
+    deliverySummary =
+      "Heartbeat was sent. Remote proactive analysis is still in progress.";
   } else if (heartbeat.state === "published") {
     deliveryState = "no_proposal";
-    deliverySummary = "No proposal has been delivered since the last heartbeat.";
+    deliverySummary =
+      "No proposal has been delivered since the last heartbeat.";
     deliveryDetail =
       "A heartbeat only asks the remote proactive agent to analyze the workspace. It may decide not to create a proposal.";
   } else if (heartbeat.state === "failed") {
     deliveryState = "error";
-    deliverySummary = "Workspace creation finished, but the proactive heartbeat failed.";
+    deliverySummary =
+      "Workspace creation finished, but the proactive heartbeat failed.";
     deliveryDetail = heartbeat.detail;
   } else if (heartbeat.state === "skipped") {
     deliveryState = "inactive";
@@ -5660,9 +5703,15 @@ async function startOAuthFlow(
   return result;
 }
 
-async function composioFetch<T>(path: string, method: "GET" | "POST", payload?: unknown): Promise<T> {
+async function composioFetch<T>(
+  path: string,
+  method: "GET" | "POST",
+  payload?: unknown,
+): Promise<T> {
   if (!AUTH_BASE_URL) {
-    throw new Error("Backend is not configured (HOLABOSS_AUTH_BASE_URL missing)");
+    throw new Error(
+      "Backend is not configured (HOLABOSS_AUTH_BASE_URL missing)",
+    );
   }
   const cookieHeader = authCookieHeader();
   if (!cookieHeader) {
@@ -5679,7 +5728,9 @@ async function composioFetch<T>(path: string, method: "GET" | "POST", payload?: 
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Composio API error (${response.status}): ${text.slice(0, 300)}`);
+    throw new Error(
+      `Composio API error (${response.status}): ${text.slice(0, 300)}`,
+    );
   }
   return response.json() as Promise<T>;
 }
@@ -5689,7 +5740,11 @@ async function composioConnect(payload: {
   owner_user_id: string;
   callback_url?: string;
 }): Promise<ComposioConnectResult> {
-  return composioFetch<ComposioConnectResult>("/api/composio/connect", "POST", payload);
+  return composioFetch<ComposioConnectResult>(
+    "/api/composio/connect",
+    "POST",
+    payload,
+  );
 }
 
 interface ComposioToolkit {
@@ -5701,17 +5756,25 @@ interface ComposioToolkit {
   categories: string[];
 }
 
-async function composioListToolkits(): Promise<{ toolkits: ComposioToolkit[] }> {
+async function composioListToolkits(): Promise<{
+  toolkits: ComposioToolkit[];
+}> {
   if (!authCookieHeader()) {
     return { toolkits: [] };
   }
-  return composioFetch<{ toolkits: ComposioToolkit[] }>("/api/composio/toolkits", "GET");
+  return composioFetch<{ toolkits: ComposioToolkit[] }>(
+    "/api/composio/toolkits",
+    "GET",
+  );
 }
 
 async function composioAccountStatus(
   connectedAccountId: string,
 ): Promise<ComposioAccountStatus> {
-  return composioFetch<ComposioAccountStatus>(`/api/composio/account/${encodeURIComponent(connectedAccountId)}`, "GET");
+  return composioFetch<ComposioAccountStatus>(
+    `/api/composio/account/${encodeURIComponent(connectedAccountId)}`,
+    "GET",
+  );
 }
 
 async function composioFinalize(payload: {
@@ -5820,7 +5883,12 @@ async function resolveTemplateIntegrations(
   const appNames: string[] = payload.template_apps ?? [];
 
   if (appNames.length === 0) {
-    return { requirements: [], connected_providers: [], missing_providers: [], provider_logos: {} };
+    return {
+      requirements: [],
+      connected_providers: [],
+      missing_providers: [],
+      provider_logos: {},
+    };
   }
 
   const requirements: TemplateIntegrationRequirement[] = [];
@@ -5840,7 +5908,12 @@ async function resolveTemplateIntegrations(
   }
 
   if (requirements.length === 0) {
-    return { requirements: [], connected_providers: [], missing_providers: [], provider_logos: {} };
+    return {
+      requirements: [],
+      connected_providers: [],
+      missing_providers: [],
+      provider_logos: {},
+    };
   }
 
   let connections: IntegrationConnectionPayload[] = [];
@@ -5890,12 +5963,24 @@ async function enqueueRemoteDemoTaskProposal(
   await ensureRuntimeBindingReadyForWorkspaceFlow("remote_demo_task_proposal", {
     forceRefresh: true,
   });
-  return requestControlPlaneJson<DemoTaskProposalEnqueueResponsePayload>({
-    service: "proactive",
-    method: "POST",
-    path: "/api/v1/proactive/bridge/demo/task-proposal",
-    payload,
-  });
+  try {
+    return await requestControlPlaneJson<DemoTaskProposalEnqueueResponsePayload>(
+      {
+        service: "proactive",
+        method: "POST",
+        path: "/api/v1/proactive/bridge/demo/task-proposal",
+        payload,
+      },
+    );
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes("Service not found") || msg.includes("fetch failed")) {
+      throw new Error(
+        "Proactive service is not reachable. Check your network or backend configuration.",
+      );
+    }
+    throw error;
+  }
 }
 
 async function proactivePreferenceScopeFromRuntimeConfig(): Promise<{
@@ -5938,38 +6023,61 @@ async function setProactiveTaskProposalPreference(
   payload: ProactiveTaskProposalPreferenceUpdatePayload,
 ): Promise<ProactiveTaskProposalPreferencePayload> {
   const scope = await proactivePreferenceScopeFromRuntimeConfig();
-  const response = await requestControlPlaneJson<ProactiveTaskProposalPreferencePayload>({
-    service: "proactive",
-    method: "POST",
-    path: "/api/v1/proactive/preferences/task-proposals",
-    payload: {
-      enabled: payload.enabled !== false,
-      holaboss_user_id: payload.holaboss_user_id?.trim() || scope.holabossUserId,
-      sandbox_id: payload.sandbox_id?.trim() || scope.sandboxId,
-    },
-  });
-  assertProactivePreferenceScopedToInstance(response, scope);
-  return response;
+  try {
+    const response =
+      await requestControlPlaneJson<ProactiveTaskProposalPreferencePayload>({
+        service: "proactive",
+        method: "POST",
+        path: "/api/v1/proactive/preferences/task-proposals",
+        payload: {
+          enabled: payload.enabled !== false,
+          holaboss_user_id:
+            payload.holaboss_user_id?.trim() || scope.holabossUserId,
+          sandbox_id: payload.sandbox_id?.trim() || scope.sandboxId,
+        },
+      });
+    assertProactivePreferenceScopedToInstance(response, scope);
+    return response;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes("Service not found") || msg.includes("fetch failed")) {
+      console.warn("[proactive] preference update unavailable:", msg);
+      return {
+        enabled: payload.enabled !== false,
+        holaboss_user_id: scope.holabossUserId,
+        sandbox_id: scope.sandboxId,
+      };
+    }
+    throw error;
+  }
 }
 
 async function getProactiveTaskProposalPreference(): Promise<ProactiveTaskProposalPreferencePayload> {
   try {
     const scope = await proactivePreferenceScopeFromRuntimeConfig();
-    const response = await requestControlPlaneJson<ProactiveTaskProposalPreferencePayload>({
-      service: "proactive",
-      method: "GET",
-      path: "/api/v1/proactive/preferences/task-proposals",
-      params: {
-        holaboss_user_id: scope.holabossUserId,
-        sandbox_id: scope.sandboxId,
-      },
-    });
+    const response =
+      await requestControlPlaneJson<ProactiveTaskProposalPreferencePayload>({
+        service: "proactive",
+        method: "GET",
+        path: "/api/v1/proactive/preferences/task-proposals",
+        params: {
+          holaboss_user_id: scope.holabossUserId,
+          sandbox_id: scope.sandboxId,
+        },
+      });
     assertProactivePreferenceScopedToInstance(response, scope);
     return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("Proactive auth is missing")) {
+    const isExpectedUnavailable =
+      message.includes("Proactive auth is missing") ||
+      message.includes("Service not found") ||
+      message.includes("fetch failed");
+    if (!isExpectedUnavailable) {
       throw error;
+    }
+    if (message.includes("Service not found") || message.includes("fetch failed")) {
+      console.warn("[proactive] preference fetch unavailable:", message);
     }
     const runtimeConfig = await readRuntimeConfigFile();
     const holabossUserId =
@@ -6835,8 +6943,7 @@ async function requestRuntimeJson<T>({
 
 function workspaceHarness() {
   return (
-    (process.env.HOLABOSS_RUNTIME_HARNESS || "pi").trim().toLowerCase() ||
-    "pi"
+    (process.env.HOLABOSS_RUNTIME_HARNESS || "pi").trim().toLowerCase() || "pi"
   );
 }
 
@@ -7362,8 +7469,6 @@ async function controlPlaneWorkspaceUserId(): Promise<string | null> {
   return authId.trim() || null;
 }
 
-
-
 function workspaceReadinessFromApps(apps: InstalledWorkspaceAppPayload[]) {
   const blockingApps = apps
     .filter((app) => !app.ready)
@@ -7510,9 +7615,7 @@ async function listOutputs(
   payload: string | HolabossListOutputsPayload,
 ): Promise<WorkspaceOutputListResponsePayload> {
   const requestPayload =
-    typeof payload === "string"
-      ? { workspaceId: payload }
-      : payload;
+    typeof payload === "string" ? { workspaceId: payload } : payload;
   return requestRuntimeJson<WorkspaceOutputListResponsePayload>({
     method: "GET",
     path: "/api/v1/outputs",
@@ -7700,7 +7803,9 @@ async function readSkillCatalogFromRoot(params: {
 }): Promise<WorkspaceSkillRecordPayload[]> {
   let directoryEntries;
   try {
-    directoryEntries = await fs.readdir(params.skillsRoot, { withFileTypes: true });
+    directoryEntries = await fs.readdir(params.skillsRoot, {
+      withFileTypes: true,
+    });
   } catch {
     return [];
   }
@@ -8046,17 +8151,14 @@ async function createWorkspace(
     // --- Auto-bind integrations (best-effort) ---
     if (materializedTemplate) {
       try {
-        const integrationReqs =
-          extractIntegrationRequirementsFromTemplateFiles(
-            materializedTemplate.files,
-          );
+        const integrationReqs = extractIntegrationRequirementsFromTemplateFiles(
+          materializedTemplate.files,
+        );
         if (integrationReqs.length > 0) {
           let connections: IntegrationConnectionPayload[] = [];
           try {
             const resp = await listIntegrationConnections();
-            connections = resp.connections.filter(
-              (c) => c.status === "active",
-            );
+            connections = resp.connections.filter((c) => c.status === "active");
           } catch {
             // Cannot reach integration API; skip auto-bind.
           }
@@ -8124,7 +8226,9 @@ async function createWorkspace(
     const runtimeHeartbeatToken = runtimeModelProxyApiKeyFromConfig(
       runtimeConfigForHeartbeat,
     );
-    const runtimeHeartbeatUserId = (runtimeConfigForHeartbeat.user_id || "").trim();
+    const runtimeHeartbeatUserId = (
+      runtimeConfigForHeartbeat.user_id || ""
+    ).trim();
     const requestedHeartbeatUserId = (payload.holaboss_user_id || "").trim();
     const shouldEmitWorkspaceReadyHeartbeat =
       Boolean(runtimeHeartbeatToken) &&
@@ -9501,7 +9605,11 @@ function toPreviewTableCellValue(value: unknown): string {
   if (typeof value === "string") {
     return value;
   }
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
     return String(value);
   }
   if (value instanceof Date) {
@@ -9510,7 +9618,9 @@ function toPreviewTableCellValue(value: unknown): string {
   return String(value);
 }
 
-function buildTablePreviewSheets(buffer: Buffer): FilePreviewTableSheetPayload[] {
+function buildTablePreviewSheets(
+  buffer: Buffer,
+): FilePreviewTableSheetPayload[] {
   const workbook = XLSX.read(buffer, {
     type: "buffer",
     cellDates: true,
@@ -9518,7 +9628,10 @@ function buildTablePreviewSheets(buffer: Buffer): FilePreviewTableSheetPayload[]
   });
 
   const sheets: FilePreviewTableSheetPayload[] = [];
-  const limitedSheetNames = workbook.SheetNames.slice(0, MAX_TABLE_PREVIEW_SHEETS);
+  const limitedSheetNames = workbook.SheetNames.slice(
+    0,
+    MAX_TABLE_PREVIEW_SHEETS,
+  );
   for (const [sheetIndex, sheetName] of limitedSheetNames.entries()) {
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) {
@@ -9543,8 +9656,9 @@ function buildTablePreviewSheets(buffer: Buffer): FilePreviewTableSheetPayload[]
       MAX_TABLE_PREVIEW_COLUMNS,
     );
     const paddedRows = normalizedRows.map((row) =>
-      Array.from({ length: visibleColumnCount }, (_unused, columnIndex) =>
-        row[columnIndex] ?? "",
+      Array.from(
+        { length: visibleColumnCount },
+        (_unused, columnIndex) => row[columnIndex] ?? "",
       ),
     );
 
@@ -9663,7 +9777,8 @@ async function readFilePreview(
         ...basePayload,
         kind: "unsupported",
         isEditable: false,
-        unsupportedReason: "Spreadsheet could not be parsed for inline preview.",
+        unsupportedReason:
+          "Spreadsheet could not be parsed for inline preview.",
       };
     }
   }
@@ -12390,8 +12505,11 @@ app.whenReady().then(async () => {
   handleTrustedIpc("billing:getOverview", ["main"], async () =>
     getDesktopBillingOverview(),
   );
-  handleTrustedIpc("billing:getUsage", ["main"], async (_event, limit?: number) =>
-    getDesktopBillingUsage(typeof limit === "number" ? limit : 10),
+  handleTrustedIpc(
+    "billing:getUsage",
+    ["main"],
+    async (_event, limit?: number) =>
+      getDesktopBillingUsage(typeof limit === "number" ? limit : 10),
   );
   handleTrustedIpc("billing:getLinks", ["main"], async () =>
     buildDesktopBillingLinks(),
@@ -12445,10 +12563,8 @@ app.whenReady().then(async () => {
   handleTrustedIpc("runtime:getProfile", ["main", "auth-popup"], () =>
     getRuntimeUserProfile(),
   );
-  handleTrustedIpc(
-    "runtime:getConfigDocument",
-    ["main", "auth-popup"],
-    () => getRuntimeConfigDocumentText(),
+  handleTrustedIpc("runtime:getConfigDocument", ["main", "auth-popup"], () =>
+    getRuntimeConfigDocumentText(),
   );
   handleTrustedIpc(
     "runtime:setConfig",
@@ -12471,7 +12587,8 @@ app.whenReady().then(async () => {
   handleTrustedIpc(
     "runtime:setConfigDocument",
     ["main", "auth-popup"],
-    async (_event, rawDocument: string) => setRuntimeConfigDocument(rawDocument),
+    async (_event, rawDocument: string) =>
+      setRuntimeConfigDocument(rawDocument),
   );
   handleTrustedIpc(
     "ui:getTheme",
@@ -12648,7 +12765,8 @@ app.whenReady().then(async () => {
   handleTrustedIpc(
     "workspace:listOutputs",
     ["main"],
-    async (_event, payload: string | HolabossListOutputsPayload) => listOutputs(payload),
+    async (_event, payload: string | HolabossListOutputsPayload) =>
+      listOutputs(payload),
   );
   handleTrustedIpc(
     "workspace:listSkills",
@@ -12889,10 +13007,8 @@ app.whenReady().then(async () => {
     ["main"],
     async (_event, provider: string) => startOAuthFlow(provider),
   );
-  handleTrustedIpc(
-    "workspace:composioListToolkits",
-    ["main"],
-    async () => composioListToolkits(),
+  handleTrustedIpc("workspace:composioListToolkits", ["main"], async () =>
+    composioListToolkits(),
   );
   handleTrustedIpc(
     "workspace:composioConnect",
@@ -13047,15 +13163,26 @@ app.whenReady().then(async () => {
       });
     },
   );
+  handleTrustedIpc("workspace:listSubmissions", ["main"], async () => {
+    const authorId = await controlPlaneWorkspaceUserId();
+    return requestControlPlaneJson<SubmissionListResponsePayload>({
+      service: "marketplace",
+      method: "GET",
+      path: "/api/v1/marketplace/submissions",
+      params: {
+        author_id: authorId,
+      },
+    });
+  });
   handleTrustedIpc(
-    "workspace:listSubmissions",
+    "workspace:deleteSubmission",
     ["main"],
-    async () => {
+    async (_event: unknown, params: { submissionId: string }) => {
       const authorId = await controlPlaneWorkspaceUserId();
-      return requestControlPlaneJson<SubmissionListResponsePayload>({
+      return requestControlPlaneJson<{ deleted: boolean }>({
         service: "marketplace",
-        method: "GET",
-        path: "/api/v1/marketplace/submissions",
+        method: "DELETE",
+        path: `/api/v1/marketplace/submissions/${params.submissionId}`,
         params: {
           author_id: authorId,
         },
