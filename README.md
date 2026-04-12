@@ -44,9 +44,9 @@ holaOS is the agent environment for long-horizon work. It gives agents a structu
 - [Quick Start](#quick-start)
     - [What you need](#what-you-need)
     - [One-Line Install](#one-line-install)
+- [Documentation](#documentation)
 - [Manual Install](#manual-install)
     - [One-Line Agent Setup](#one-line-agent-setup)
-- [Documentation](#documentation)
 - [OSS Release Notes](#oss-release-notes)
 
 ## Quick Start
@@ -80,6 +80,26 @@ That installer:
 - runs `npm run desktop:prepare-runtime:local`
 - runs `npm run desktop:typecheck`
 - only runs `npm run desktop:dev` when you pass `--launch`
+
+## Documentation
+
+All deeper technical and product documentation lives at **[holaboss.ai/docs](https://www.holaboss.ai/docs/)**:
+
+| Section | What's Covered |
+| --- | --- |
+| [Overview](https://www.holaboss.ai/docs/) | The merged entry page for the environment-engineering thesis and system model |
+| [Environment Engineering](https://www.holaboss.ai/docs/holaos/environment-engineering) | The core thesis behind holaOS and why the environment defines the system |
+| [Quick Start](https://www.holaboss.ai/docs/getting-started/) | The fastest path to a working local desktop environment |
+| [Learning Path](https://www.holaboss.ai/docs/getting-started/learning-path) | The technical path through the docs after setup |
+| [Concepts](https://www.holaboss.ai/docs/holaos/concepts) | Core system vocabulary for workspaces, runtime, memory, and outputs |
+| [Workspace Experience](https://www.holaboss.ai/docs/desktop/workspace-experience) | The desktop workspace surface built on top of holaOS |
+| [Workspace Model](https://www.holaboss.ai/docs/runtime/workspace-model) | Workspace contract, runtime-owned state, and filesystem layout |
+| [Memory and Continuity](https://www.holaboss.ai/docs/runtime/memory-and-continuity) | Durable memory, recall, continuity writeback, and evolve |
+| [Build Your First App](https://www.holaboss.ai/docs/app-development/first-app) | Building workspace apps on top of holaOS |
+| [Model Configuration](https://www.holaboss.ai/docs/desktop/model-configuration) | Providers, defaults, config precedence, and runtime model selection |
+| [Independent Deploy](https://www.holaboss.ai/docs/runtime/independent-deploy) | Running the portable runtime without the desktop app |
+| [Technical Details](https://www.holaboss.ai/docs/reference/technical-details) | Repo layout, common commands, and development notes |
+| [Reference](https://www.holaboss.ai/docs/reference/environment-variables) | Environment variables, workspace files, and supporting reference material |
 
 ## Manual Install
 
@@ -154,26 +174,6 @@ npm run desktop:prepare-runtime
 Use the local path when you are actively changing runtime code. Use the published bundle when you want to verify the desktop against a known release artifact.
 
 Use `One-Line Install` when you want the fastest path to a working local desktop environment. Use `Manual Install` when you need to inspect or control each setup step yourself.
-
-## Documentation
-
-All deeper technical and product documentation lives at **[holaboss.ai/docs](https://www.holaboss.ai/docs/)**:
-
-| Section | What's Covered |
-| --- | --- |
-| [Overview](https://www.holaboss.ai/docs/) | The merged entry page for the environment-engineering thesis and system model |
-| [Environment Engineering](https://www.holaboss.ai/docs/holaos/environment-engineering) | The core thesis behind holaOS and why the environment defines the system |
-| [Quick Start](https://www.holaboss.ai/docs/getting-started/) | The fastest path to a working local desktop environment |
-| [Learning Path](https://www.holaboss.ai/docs/getting-started/learning-path) | The technical path through the docs after setup |
-| [Concepts](https://www.holaboss.ai/docs/holaos/concepts) | Core system vocabulary for workspaces, runtime, memory, and outputs |
-| [Workspace Experience](https://www.holaboss.ai/docs/desktop/workspace-experience) | The desktop workspace surface built on top of holaOS |
-| [Workspace Model](https://www.holaboss.ai/docs/runtime/workspace-model) | Workspace contract, runtime-owned state, and filesystem layout |
-| [Memory and Continuity](https://www.holaboss.ai/docs/runtime/memory-and-continuity) | Durable memory, recall, continuity writeback, and evolve |
-| [Build Your First App](https://www.holaboss.ai/docs/app-development/first-app) | Building workspace apps on top of holaOS |
-| [Model Configuration](https://www.holaboss.ai/docs/desktop/model-configuration) | Providers, defaults, config precedence, and runtime model selection |
-| [Independent Deploy](https://www.holaboss.ai/docs/runtime/independent-deploy) | Running the portable runtime without the desktop app |
-| [Technical Details](https://www.holaboss.ai/docs/reference/technical-details) | Repo layout, common commands, and development notes |
-| [Reference](https://www.holaboss.ai/docs/reference/environment-variables) | Environment variables, workspace files, and supporting reference material |
 
 ## OSS Release Notes
 
