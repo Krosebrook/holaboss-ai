@@ -71,4 +71,4 @@ If the workspace files are valid but the runtime still behaves unexpectedly, com
 
 If none of the fixes on this page help, submit an issue here:
 
-- [Open a GitHub issue](https://github.com/holaboss-ai/holaboss-ai/issues/new/choose)
+- [Open a GitHub issue](https://github.com/holaboss-ai/holaOS/issues/new/choose)

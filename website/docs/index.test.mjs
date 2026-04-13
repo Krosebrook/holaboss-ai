@@ -42,6 +42,14 @@ const DOC_TERM_PATH = new URL(
   import.meta.url
 );
 const ROOT_PACKAGE_PATH = new URL("../../package.json", import.meta.url);
+const QUICK_START_PATH = new URL(
+  "./docs/getting-started/index.md",
+  import.meta.url
+);
+const TROUBLESHOOTING_PATH = new URL(
+  "./docs/build-on-holaos/troubleshooting.md",
+  import.meta.url
+);
 
 test("docs app exposes vitepress build and preview scripts", async () => {
   const source = await readFile(APP_PACKAGE_PATH, "utf8");
@@ -69,7 +77,6 @@ test("vitepress config is set up for the agreed documentation structure", async 
   assert.match(source, /text:\s*"Get Started"/);
   assert.match(source, /text:\s*"holaOS"/);
   assert.match(source, /text:\s*"Build on holaOS"/);
-  assert.match(source, /text:\s*"Holaboss Desktop"/);
   assert.match(source, /text:\s*"Reference"/);
   assert.match(source, /text:\s*"Runtime"/);
   assert.match(source, /"\/getting-started\/"/);
@@ -82,7 +89,6 @@ test("vitepress config is set up for the agreed documentation structure", async 
   assert.match(source, /"\/holaos\/agent-harness\/mcp-support"/);
   assert.match(source, /"\/holaos\/agent-harness\/skills-usage"/);
   assert.match(source, /"\/holaos\/agent-harness\/model-routing"/);
-  assert.match(source, /"\/holaos\/agent-harness\/normalized-lifecycle"/);
   assert.match(source, /"\/holaos\/workspace-model"/);
   assert.match(source, /"\/holaos\/memory-and-continuity\/"/);
   assert.match(source, /"\/holaos\/memory-and-continuity\/runtime-continuity"/);
@@ -98,6 +104,15 @@ test("vitepress config is set up for the agreed documentation structure", async 
   assert.match(source, /"\/build-on-holaos\/start-developing\/contributing"/);
   assert.match(source, /"\/build-on-holaos\/troubleshooting"/);
   assert.match(source, /"\/reference\/environment-variables"/);
+  assert.match(source, /editLink:\s*\{/);
+  assert.match(
+    source,
+    /https:\/\/github\.com\/holaboss-ai\/holaOS\/edit\/main\/website\/docs\/docs\/:path/
+  );
+  assert.match(source, /https:\/\/github\.com\/holaboss-ai\/holaOS/);
+  assert.match(source, /text:\s*"Edit this page on GitHub"/);
+  assert.doesNotMatch(source, /text:\s*"Holaboss Desktop"/);
+  assert.doesNotMatch(source, /github\.com\/holaboss-ai\/holaboss-ai/);
   assert.doesNotMatch(source, /"\/desktop\/quickstart"/);
   assert.doesNotMatch(source, /link:\s*"\/concepts"/);
   assert.doesNotMatch(source, /link:\s*"\/learning-path"/);
@@ -127,6 +142,20 @@ test("docs root page is a normal documentation page instead of a home hero landi
   assert.doesNotMatch(source, /layout:\s*home/);
   assert.match(source, /# Overview/);
   assert.match(source, /## Read Next/);
+});
+
+test("docs pages point to the holaOS repository instead of the legacy repo path", async () => {
+  const quickStart = await readFile(QUICK_START_PATH, "utf8");
+  const troubleshooting = await readFile(TROUBLESHOOTING_PATH, "utf8");
+
+  assert.match(
+    quickStart,
+    /raw\.githubusercontent\.com\/holaboss-ai\/holaOS\/main\/scripts\/install\.sh/
+  );
+  assert.match(quickStart, /github\.com\/holaboss-ai\/holaOS\.git/);
+  assert.match(troubleshooting, /github\.com\/holaboss-ai\/holaOS\/issues\/new\/choose/);
+  assert.doesNotMatch(quickStart, /holaboss-ai\/holaboss-ai/);
+  assert.doesNotMatch(troubleshooting, /holaboss-ai\/holaboss-ai/);
 });
 
 test("vitepress theme extends the default theme and registers shared doc components", async () => {

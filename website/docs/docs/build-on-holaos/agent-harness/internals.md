@@ -2,7 +2,9 @@
 
 Use this page when you are expanding the harness boundary itself rather than only building apps or templates.
 
-The runtime intentionally splits the harness into a runtime adapter, a runtime plugin, and a harness-host plugin so a new executor can fit into the same `holaOS` environment model without redefining memory, continuity, or the workspace contract.
+In `holaOS`, a harness path is not only the underlying executor. It is the runtime adapter, the runtime plugin, the harness-host plugin, and the executor underneath them as one execution boundary.
+
+The runtime intentionally splits that boundary so a new executor can fit into the same `holaOS` environment model without redefining memory, continuity, or the workspace contract.
 
 ## Main code seams
 
@@ -19,7 +21,7 @@ The runtime intentionally splits the harness into a runtime adapter, a runtime p
 - `runtime/harness-host/src/pi-web-search.ts`: hosted native web search bridge for the current `web_search` tool.
 - `runtime/harnesses/src/desktop-browser-tools.ts`, `runtime/harnesses/src/runtime-agent-tools.ts`, and `runtime/harnesses/src/native-web-search-tools.ts`: canonical ids and descriptions for the projected browser, runtime, and native web-search surfaces.
 
-## How to add another harness
+## How to add another harness path
 
 1. Add a new runtime adapter under `runtime/harnesses/src/` that declares capabilities and a runner prep plan.
 2. Build the host request from the runtime's reduced execution package instead of letting the executor infer state implicitly.
@@ -38,7 +40,7 @@ The runtime intentionally splits the harness into a runtime adapter, a runtime p
 
 ## Current implementation notes
 
-Today the shipped path is `pi`, backed by the `pi` adapter and host implementation. The easiest way to understand the current flow is:
+Today the shipped harness path is `pi`, backed by the `pi` adapter, the runtime plugin wiring, the `pi` host implementation, and the Pi-based executor. The easiest way to understand the current flow is:
 
 1. Start in `runtime/harnesses/src/pi.ts`.
 2. Follow registration through `runtime/api-server/src/harness-registry.ts`.

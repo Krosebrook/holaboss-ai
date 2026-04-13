@@ -4,7 +4,7 @@ This is the recommended local path for `holaOS` development: install the desktop
 
 <DiagramLocalStack />
 
-For local development, think in three layers: desktop operator UI, a runtime bundle that includes the harness boundary, and workspace apps loaded by that runtime.
+For local development, think in three layers: desktop operator UI, a runtime bundle that includes the harness path, and workspace apps loaded by that runtime.
 
 ## Start with Quick Start
 
@@ -62,4 +62,4 @@ The local flow assumes Node.js 22+ and a working desktop toolchain. If Electron 
 
 ## Next
 
-If you are expanding the desktop shell itself, continue to [Desktop Internals](/build-on-holaos/desktop/internals). If you are expanding the executor boundary, continue to [Agent Harness Internals](/build-on-holaos/agent-harness/internals). For the contributor workflow, validation expectations, and review guidance, continue to [Contributing](/build-on-holaos/start-developing/contributing).
+If you are expanding the desktop shell itself, continue to [Desktop Internals](/build-on-holaos/desktop/internals). If you are expanding the harness path or execution boundary, continue to [Agent Harness Internals](/build-on-holaos/agent-harness/internals). For the contributor workflow, validation expectations, and review guidance, continue to [Contributing](/build-on-holaos/start-developing/contributing).

@@ -31,11 +31,6 @@ export default defineConfig({
         activeMatch: "^/(app-development/|templates/|build-on-holaos/)",
       },
       {
-        text: "Holaboss Desktop",
-        link: "/desktop/workspace-experience",
-        activeMatch: "^/desktop/",
-      },
-      {
         text: "Reference",
         link: "/reference/environment-variables",
         activeMatch: "^/reference(/|$)",
@@ -105,10 +100,6 @@ export default defineConfig({
               {
                 text: "Model Routing",
                 link: "/holaos/agent-harness/model-routing",
-              },
-              {
-                text: "Normalized Lifecycle",
-                link: "/holaos/agent-harness/normalized-lifecycle",
               },
             ],
           },
@@ -221,7 +212,12 @@ export default defineConfig({
       },
     ],
     socialLinks: [
-      { icon: "github", link: "https://github.com/holaboss-ai/holaboss-ai" },
+      { icon: "github", link: "https://github.com/holaboss-ai/holaOS" },
     ],
+    editLink: {
+      pattern:
+        "https://github.com/holaboss-ai/holaOS/edit/main/website/docs/docs/:path",
+      text: "Edit this page on GitHub",
+    },
   },
 });

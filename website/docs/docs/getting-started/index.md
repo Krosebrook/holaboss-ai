@@ -9,13 +9,13 @@ After the desktop boots, first-workspace creation can start from an empty worksp
 For a fresh-machine bootstrap on macOS, Linux, or WSL, use the repository installer and continue directly into the desktop dev environment after verification:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/holaboss-ai/holaboss-ai/main/scripts/install.sh | bash -s -- --launch
+curl -fsSL https://raw.githubusercontent.com/holaboss-ai/holaOS/main/scripts/install.sh | bash -s -- --launch
 ```
 
 That installer:
 
 - installs missing `git` and Node.js `22` / `npm` when needed
-- clones the repository into `~/holaboss-ai` by default
+- clones the repository into `~/holaOS` by default
 - creates `desktop/.env` from `desktop/.env.example` if needed
 - runs `npm run desktop:install`
 - runs `npm run desktop:prepare-runtime:local`
@@ -47,7 +47,7 @@ npm --version
 If you are using Codex, Claude Code, Cursor, Windsurf, or another coding agent, you can hand it the setup instructions in one sentence:
 
 ```text
-Clone the Holaboss repo from https://github.com/holaboss-ai/holaboss-ai.git if needed, or use the current checkout if it is already open, then follow INSTALL.md exactly to bootstrap local desktop development. If the environment cannot open Electron, stop after verification and tell me the next manual step.
+Clone the holaOS repo from https://github.com/holaboss-ai/holaOS.git if needed, or use the current checkout if it is already open, then follow INSTALL.md exactly to bootstrap local desktop development. If the environment cannot open Electron, stop after verification and tell me the next manual step.
 ```
 
 That handoff keeps the installation flow self-contained while leaving the detailed bootstrap steps in the repo-local `INSTALL.md` runbook.
@@ -56,11 +56,11 @@ This is the baseline installation flow for local desktop development.
 
 <DocSteps>
   <DocStep title="Clone the repository">
-Clone the Holaboss repository and move into the project root:
+Clone the holaOS repository and move into the project root:
 
 ```bash
-git clone https://github.com/holaboss-ai/holaboss-ai.git
-cd holaboss-ai
+git clone https://github.com/holaboss-ai/holaOS.git
+cd holaOS
 ```
   </DocStep>
 
@@ -122,7 +122,3 @@ npm run desktop:prepare-runtime
 ```
 
 Use `desktop:prepare-runtime:local` for active runtime development. Use `desktop:prepare-runtime` when you want to test against the published bundle path.
-
-::: tip
-Use `One-line Install` when you want the fastest path to a working local desktop environment. Use `Manual Install` when you need to inspect or control each setup step yourself.
-:::

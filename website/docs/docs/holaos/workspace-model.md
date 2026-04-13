@@ -186,26 +186,6 @@ Workspace-local apps live under `apps/<app-id>/`. Each app must provide `app.run
 
 `memory/` is OS-global, not part of a single workspace directory. It holds the markdown memory surfaces used by the runtime memory service.
 
-## What belongs where
-
-Use these rules of thumb:
-
-| Information type | Best home |
-| --- | --- |
-| Standing workspace policy | `AGENTS.md` |
-| Onboarding instructions | `ONBOARD.md` |
-| Workspace plan and app inventory | `workspace.yaml` |
-| Workspace commands | `workspace.yaml` |
-| App lifecycle and port/runtime contract | `apps/<app-id>/app.runtime.yaml` |
-| App integration requirements | `apps/<app-id>/app.runtime.yaml` → `integrations` |
-| Integration connections and bindings | `state/runtime.db` |
-| Execution truth and session continuity | `state/runtime.db` |
-| Durable workspace memory | `memory/workspace/<workspace-id>/knowledge/` |
-| Durable user preferences | `memory/preference/` |
-| Durable user identity | `memory/identity/` |
-| Latest-turn or resume-only context | `memory/workspace/<workspace-id>/runtime/` |
-
-If a piece of information only matters for the next resume, keep it in runtime continuity. If it should be recalled later, keep it in durable memory. If it is a standing rule for the workspace, keep it in `AGENTS.md`.
 
 ## What the runtime compiles per run
 

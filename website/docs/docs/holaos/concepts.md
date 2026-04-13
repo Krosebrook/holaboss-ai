@@ -20,8 +20,8 @@ In this model, `holaOS` is the environment layer: the workspace contract, the ru
   The runtime is the portable service layer inside `holaOS` that actually runs a workspace. It owns execution, memory and continuity services, app orchestration, capability projection, the durable state that keeps a workspace consistent over time, and the harness host that invokes the selected agent harness.
 </DocDefinition>
 
-<DocDefinition term="Agent Harness" meta="selected executor">
-  The agent harness is the actual executor the runtime hands a prepared run to. It does not define the workspace model by itself. The runtime compiles a reduced execution package and passes that package across the harness boundary to the selected harness. Today the OSS repo ships the `pi` harness path, but the boundary is designed so other harnesses can be added later.
+<DocDefinition term="Agent Harness" meta="execution boundary">
+  The agent harness is the swappable execution and control layer the runtime hands a prepared run to. It does not define the workspace model by itself. The runtime compiles a reduced execution package and passes that package across the harness boundary to the selected harness path. Today the OSS repo ships the `pi` harness path, but the boundary is designed so other harnesses can be added later.
 </DocDefinition>
 
 <DocDefinition term="Workspace" meta="unit of work">
@@ -44,8 +44,6 @@ In this model, `holaOS` is the environment layer: the workspace contract, the ru
   An app adds a focused capability to a workspace. Apps can provide UI, automation, MCP tools, background jobs, and their own state. Each app declares what integrations it needs in its `app.runtime.yaml` manifest. Think of apps as modular building blocks rather than generic plugins.
 </DocDefinition>
 
-Apps are the packaging layer that gives a workspace durable product capability without pushing that responsibility into the harness or the base workspace policy. For the system-level explanation of why the app layer exists, read [Apps in holaOS](/holaos/apps).
-
 <DocDefinition term="Integration" meta="account connection">
   An integration connects a workspace to an external service like Gmail, GitHub, or Twitter. Apps declare which integrations they require; the runtime resolves those requirements for the workspace by binding connected accounts to apps. Credentials are managed by the runtime broker — apps never see raw tokens directly.
 </DocDefinition>
@@ -59,7 +57,7 @@ Apps are the packaging layer that gives a workspace durable product capability w
 </DocDefinition>
 
 <DocDefinition term="Environment Engineering" meta="systems thesis">
-  The idea that long-horizon agent systems should be defined by their environment contract: workspace structure, memory surfaces, evolve behavior, capability projection, and harness boundary. The harness still matters, but it is no longer the only thing that defines the system.
+  The idea that long-horizon agent systems should be defined by their environment contract: workspace structure, memory surfaces, evolve behavior, capability projection, and harness boundary. In `holaOS`, this means separating the broad industry idea of a "harness" into a durable environment contract plus a swappable execution subsystem.
 </DocDefinition>
 
 <DocDefinition term="MCP" meta="tool surface">
@@ -76,7 +74,7 @@ Apps are the packaging layer that gives a workspace durable product capability w
 
 ## How the pieces relate
 
-1. The desktop app opens or creates a workspace (optionally from a template).
+1. The desktop opens or creates a workspace (optionally from a template).
 2. The workspace provides the authored contract: instructions, commands, apps, skills, and model settings.
 3. The runtime resolves memory, continuity, capabilities, integrations, and prompt/model configuration for that run.
 4. The runtime passes a reduced execution package to the selected agent harness.
@@ -93,7 +91,7 @@ Apps are the packaging layer that gives a workspace durable product capability w
     title="Environment Engineering"
     eyebrow="Core thesis"
     href="/holaos/environment-engineering"
-    description="See how the environment-centric model differs from a harness-centric one."
+    description="See how holaOS separates a durable environment contract from the swappable harness path."
   />
   <DocCard
     title="Workspace Model"
@@ -111,6 +109,6 @@ Apps are the packaging layer that gives a workspace durable product capability w
     title="Agent Harness"
     eyebrow="Execution boundary"
     href="/holaos/agent-harness/"
-    description="See what the runtime passes into the harness and which capability surfaces the current path exposes."
+    description="See what the runtime passes into the harness, what comes back out, and which capability surfaces the current path exposes."
   />
 </DocCards>

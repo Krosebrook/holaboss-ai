@@ -1,6 +1,6 @@
 # Harness Overview
 
-The agent harness is the executor the runtime uses for a run. In `holaOS`, the harness is a subsystem inside the runtime boundary, not the whole system. The runtime still owns the environment contract around it: workspace structure, memory and continuity, capability projection, app orchestration, and the reduced execution package passed into the harness.
+A harness is the execution and control layer that turns a model or agent runtime into a usable agent. In `holaOS`, the harness is the swappable execution subsystem inside the runtime boundary. The runtime still owns the environment contract around it: workspace structure, memory and continuity, capability projection, app orchestration, and the reduced execution package passed into the harness.
 
 ## Where it sits
 
@@ -11,20 +11,33 @@ The agent harness is the executor the runtime uses for a run. In `holaOS`, the h
 
 The harness sits inside the runtime execution boundary. It does not sit beside the workspace, and it does not replace the runtime.
 
-## Why the harness is interchangeable
+## What the harness owns
+
+Inside `holaOS`, the harness owns the parts of execution that are allowed to vary with the selected executor:
+
+- agent-loop behavior
+- tool-call execution semantics
+- retries, waiting, and stop conditions
+- executor-native context handling
+- translation from runtime inputs into executor-native session state
+- normalization of executor-native events back into runtime lifecycle events
+
+## What the harness does not own
+
+The harness is not the source of truth for the whole system. It should consume a prepared environment, not redefine it.
+
+- the workspace contract
+- durable memory and continuity
+- capability policy and per-run projection
+- app lifecycle and integration wiring
+- packaging and portability rules
+- the desktop or any other operator-facing product surface
+
+## Why the harness is swappable
 
 `holaOS` does not hard-code one harness as the whole system contract. Instead, the runtime defines a stable boundary around the harness so different executors can fit into the same environment model.
 
-That means the harness can, in principle, be swapped for other agent runtimes such as:
-
-- OpenCode
-- Codex
-- Claude Code
-- Hermes Agent
-- OpenClaw
-- another future harness that can satisfy the same contract
-
-The important point is not the specific harness brand. The important point is that the workspace model, memory behavior, continuity state, and capability projection do not have to be redefined every time the executor changes.
+The important point is not the specific harness brand. The important point is that the workspace model, memory behavior, continuity state, and capability projection do not have to be redefined every time the executor changes. If another executor can satisfy the same boundary, it can fit into the same environment model.
 
 ## What the runtime contract passes in
 
@@ -41,6 +54,17 @@ Today the runtime prepares a harness request that includes:
 
 The harness receives a reduced execution package, not the whole raw system.
 
+## What comes back out
+
+The harness contract is not only about what goes in. It is also about what comes back out.
+
+- normalized lifecycle events
+- streamed thinking and output deltas
+- tool-call and skill-invocation events
+- waiting-user and terminal run state
+
+That output contract is what lets the rest of the runtime and desktop observe runs without depending on one executor's native event format.
+
 ## Attachment handling
 
 The current host does more than pass attachment file paths through blindly. It stages and interprets the attachment surface before the executor sees it:
@@ -51,7 +75,7 @@ The current host does more than pass attachment file paths through blindly. It s
 
 That is part of the runtime-to-host boundary, not an ad hoc executor detail.
 
-## Current shipped path
+## Current harness path
 
 Today the OSS repo ships one harness path: `pi`.
 

@@ -11,7 +11,7 @@ Use [Overview](/) for the merged entry page, then continue with [Environment Eng
     title="Environment Engineering"
     eyebrow="Core Thesis"
     href="/holaos/environment-engineering"
-    description="See the harness-centric vs environment-centric distinction and the main design consequences."
+    description="See how holaOS separates a durable environment contract from a swappable harness path."
   />
   <DocCard
     title="Workspace Model"

@@ -37,17 +37,6 @@ If you are extending the system, continue into [Build Your First App](/app-devel
   </DocStep>
 </DocSteps>
 
-## What holaOS owns
-
-The environment, not just the harness, defines:
-
-- the workspace filesystem contract
-- durable memory and recall surfaces
-- self-evolving post-run behavior
-- capability projection per run
-- the harness boundary and execution package
-- packaging and portability
-
 ## What This Site Covers
 
 Use this docs site when you want the technical and developer view:

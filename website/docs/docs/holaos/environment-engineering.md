@@ -1,35 +1,47 @@
 # Environment Engineering
 
-This page explains the core technical thesis behind `holaOS`: long-horizon agent systems need environment engineering, not only harness engineering.
+This page explains the core technical thesis behind `holaOS`: long-horizon agent systems need environment engineering as well as harness engineering.
 
-The point is not to minimize the harness. The point is that workspace structure, memory, continuity, capability boundaries, and portability need to be designed as first-class system surfaces rather than left implicit inside one executor loop.
+Current agent discourse usually uses the word "harness" broadly. A harness often means the whole execution and control layer around an agent: tools, permissions, context handling, retries, approvals, streaming, and stop rules. `holaOS` agrees that this layer matters. Its stronger claim is that some of those responsibilities should be pulled into a durable environment contract rather than left implicit inside one swappable execution runtime.
+
+## How `holaOS` uses the term
+
+In `holaOS`, the harness is the swappable execution subsystem inside the runtime boundary. The environment is the durable operating context around it.
+
+That split is the point of this page:
+
+- harness engineering makes a run operable
+- environment engineering makes the operating context durable, inspectable, portable, and stable across runs
+
+The goal is not to minimize the harness. The goal is to make workspace structure, memory, continuity, capability boundaries, and portability into first-class system surfaces rather than executor-specific behavior.
 
 ## Harnesses still matter
 
 Harness engineering focuses on how a run executes:
 
-- provider/model wiring
-- tool schemas
-- streaming
-- retries
-- transport and executor behavior
+- provider and model wiring
+- tool schemas and call semantics
+- streaming and event flow
+- retries, stop conditions, and waiting behavior
+- permissions, transport, and executor behavior
+- executor-native context management
 
 That work is essential. A harness determines how well a run thinks, plans, invokes tools, handles browsing and attachments, streams progress, and reaches a stable stopping point.
 
-`holaOS` makes a narrower claim: harness engineering determines how a run executes, but it does not by itself define what should remain true before, during, and after that run.
+`holaOS` makes a narrower claim: even a strong harness does not by itself define what should remain true before, during, and after a run.
 
 ## Why the environment becomes primary
 
-A one-off task system can get surprisingly far with a strong harness. A long-horizon system cannot. Long-horizon work needs:
+A one-off task system can get surprisingly far with a thick harness. A long-horizon system still needs a stable environment around that harness. Long-horizon work needs:
 
-- a stable workspace that persists authored intent
+- a workspace that persists authored intent
 - memory that survives beyond one session
 - continuity that lets the next run resume coherently
 - capability governance that is explicit per run
 - outputs and operator visibility that keep progress inspectable
 - a place where repeated behavior can become durable improvement
 
-Without that environment contract, a capable harness still tends to leave the most important questions under-specified:
+Without that environment contract, even a capable harness still tends to leave the most important questions under-specified:
 
 - where standing instructions live
 - what memory is durable vs volatile
@@ -37,11 +49,6 @@ Without that environment contract, a capable harness still tends to leave the mo
 - what the agent is actually allowed to see and call
 - how the system evolves after repeated work
 - what makes the whole unit portable
-
-The shortest version is:
-
-- a harness makes a run capable
-- an environment makes capability persist, accumulate, and survive executor changes
 
 You can test the idea with one question: if you replaced the harness tomorrow, what should remain true?
 
@@ -52,29 +59,39 @@ In `holaOS`, these things should still hold:
 - capability projection and visibility rules
 - app and integration wiring
 - output artifacts
-- desktop/operator visibility
+- desktop and operator visibility
 - the system's ability to resume work across time
 
 If those invariants should survive a harness swap, then the environment is the primary system artifact and the harness is a subsystem inside it.
 
 ## The environment contract
 
-The `holaOS` environment currently defines:
+The `holaOS` environment is not one flat bag of features. It defines several layers of state around the harness boundary.
 
-1. workspace structure
-   - the authored workspace root and its app/skill surfaces
-2. memory surfaces
-   - durable markdown memory plus runtime-owned volatile projections
-3. continuity artifacts
-   - `turn_results`, compaction boundaries, request snapshots, and `session-memory`
-4. capability projection
-   - the visible and callable surface passed to the harness for each run
-5. self-evolving behavior
-   - queued follow-up work for durable-memory promotion and candidate skill review
-6. harness boundary
-   - the reduced execution package that the harness receives
-7. packaging and portability
-   - what a workspace carries with it and what runtime residue gets omitted
+### Durable authored state
+
+- the workspace root and its authored structure
+- app manifests, commands, skills, and standing instructions
+- the packaging rules that make a workspace reproducible and portable
+
+### Durable learned state
+
+- markdown memory that can survive across runs
+- durable outputs and reusable artifacts
+- self-evolving follow-up work such as candidate skill review and memory promotion
+
+### Runtime continuity state
+
+- `turn_results`
+- compaction boundaries
+- request snapshots
+- `session-memory`
+
+### Projected execution state
+
+- the visible and callable surface passed to the harness for a run
+- the reduced execution package the harness receives
+- selected model routing, attachment batches, MCP visibility, and run metadata
 
 `holaOS` is not only about keeping one run coherent. It is also about making an operating context portable. A workspace should be reproducible, inspectable, and packageable without dragging along transient runtime residue. That is why the environment contract includes packaging boundaries and template surfaces: a workspace can be materialized from a known starting shape, and that starting shape can be reused across machines, teams, and future runs.
 
